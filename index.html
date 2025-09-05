@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mythos Ascendant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7fafc;
+        }
+        .container {
+            max-width: 900px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 flex flex-col items-center">
+
+    <div class="container mx-auto p-8 bg-white shadow-xl rounded-2xl md:p-12 mt-6">
+        <header class="text-center mb-10">
+            <h1 class="text-4xl md:text-5xl font-extrabold text-gray-900 leading-tight">Mythos Ascendant</h1>
+            <p class="text-lg text-gray-600 mt-2">Track your mythological journey and climb the ranks!</p>
+        </header>
+        
+        <!-- Submission Form Section -->
+        <section class="mb-12">
+            <h2 class="text-2xl md:text-3xl font-bold text-gray-800 mb-6 text-center">Submit an Activity</h2>
+            <form id="submission-form" class="space-y-6">
+                <div>
+                    <label for="studentEmail" class="block text-sm font-medium text-gray-700">Student Email</label>
+                    <input type="email" id="studentEmail" name="studentEmail" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                
+                <div>
+                    <label for="mediaType" class="block text-sm font-medium text-gray-700">Type of Media</label>
+                    <select id="mediaType" name="mediaType" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">-- Select --</option>
+                        <option value="Written Story (book, online, etc)">Written Story (book, online, etc)</option>
+                        <option value="Movie/TV Show/Play/Musical">Movie/TV Show/Play/Musical</option>
+                        <option value="Video Game">Video Game</option>
+                        <option value="Podcast/Audio">Podcast/Audio</option>
+                        <option value="Graphic Novel/Comic Book">Graphic Novel/Comic Book</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label for="mediaTitle" class="block text-sm font-medium text-gray-700">Title of Media</label>
+                    <input type="text" id="mediaTitle" name="mediaTitle" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                
+                <div id="bonus-points-section">
+                    <label class="block text-sm font-medium text-gray-700">Bonus Points</label>
+                    <p class="text-xs text-gray-500 mb-2">Did you read a foundational myth that directly connects to this modern story?</p>
+                    <div class="flex items-center space-x-4">
+                        <div class="flex items-center">
+                            <input id="bonusYes" name="bonusPoints" type="radio" value="Yes" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded">
+                            <label for="bonusYes" class="ml-2 block text-sm font-medium text-gray-700">Yes</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input id="bonusNo" name="bonusPoints" type="radio" value="No" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" checked>
+                            <label for="bonusNo" class="ml-2 block text-sm font-medium text-gray-700">No</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="reflection" class="block text-sm font-medium text-gray-700">Reflection</label>
+                    <textarea id="reflection" name="reflection" rows="4" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></textarea>
+                </div>
+                
+                <div id="status-message" class="text-center"></div>
+                
+                <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+                    Submit Activity
+                </button>
+            </form>
+        </section>
+
+        <!-- Leaderboard Section -->
+        <hr class="border-gray-300 my-10" />
+
+        <section>
+            <h2 class="text-2xl md:text-3xl font-bold text-gray-800 mb-6 text-center">Current Leaderboard</h2>
+            
+            <!-- Class Period Filter -->
+            <div class="mb-6 flex justify-center">
+                <div class="w-64">
+                    <label for="classPeriodFilter" class="block text-sm font-medium text-gray-700 mb-2">Filter by Class Period</label>
+                    <select id="classPeriodFilter" class="block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        <option value="All Classes">All Classes</option>
+                        <!-- Options will be dynamically populated -->
+                    </select>
+                </div>
+            </div>
+            
+            <div id="leaderboard" class="overflow-x-auto">
+                <!-- Leaderboard data will be dynamically loaded here -->
+                <p id="leaderboard-status" class="text-center text-gray-500">Loading leaderboard...</p>
+            </div>
+        </section>
+
+    </div>
+
+    <script>
+        const form = document.getElementById('submission-form');
+        const statusMessage = document.getElementById('status-message');
+        const leaderboardContainer = document.getElementById('leaderboard');
+        const leaderboardStatus = document.getElementById('leaderboard-status');
+        const classPeriodFilter = document.getElementById('classPeriodFilter');
+
+        // Handles form submission
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            
+            statusMessage.innerHTML = '<span class="text-blue-500">Submitting...</span>';
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            // Calls the server-side function to process the submission
+            google.script.run
+                .withSuccessHandler(onSubmissionSuccess)
+                .withFailureHandler(onSubmissionFailure)
+                .processSubmission(data);
+        });
+
+        function onSubmissionSuccess(result) {
+            if (result.status === 'success') {
+                statusMessage.innerHTML = `<span class="text-green-600">${result.message}</span>`;
+                form.reset();
+                loadLeaderboard(); // Refresh the leaderboard
+            } else {
+                statusMessage.innerHTML = `<span class="text-red-600">Error: ${result.message}</span>`;
+            }
+        }
+
+        function onSubmissionFailure(error) {
+            statusMessage.innerHTML = `<span class="text-red-600">Error: ${error.message}</span>`;
+        }
+
+        // Populate class period filter options
+        function loadClassPeriods() {
+            google.script.run
+                .withSuccessHandler(function(classPeriods) {
+                    // Clear existing options except "All Classes"
+                    while (classPeriodFilter.children.length > 1) {
+                        classPeriodFilter.removeChild(classPeriodFilter.lastChild);
+                    }
+                    
+                    // Add class period options
+                    classPeriods.forEach(period => {
+                        const option = document.createElement('option');
+                        option.value = period;
+                        option.textContent = period;
+                        classPeriodFilter.appendChild(option);
+                    });
+                })
+                .withFailureHandler(function(error) {
+                    console.error("Failed to load class periods:", error);
+                })
+                .getClassPeriods();
+        }
+
+        // Handles the leaderboard display
+        function loadLeaderboard() {
+            console.log("=== DEBUG: loadLeaderboard() called ===");
+            leaderboardStatus.innerText = "Loading leaderboard...";
+            const selectedClassPeriod = classPeriodFilter.value;
+            console.log("Selected class period filter:", selectedClassPeriod);
+            
+            google.script.run
+                .withSuccessHandler(function(data) {
+                    console.log("=== DEBUG: Leaderboard data received ===");
+                    console.log("Data type:", typeof data);
+                    console.log("Data length:", data ? data.length : 'undefined');
+                    console.log("Raw data:", data);
+                    renderLeaderboard(data);
+                })
+                .withFailureHandler(function(error) {
+                    console.error("=== DEBUG: Leaderboard load failed ===");
+                    console.error("Error:", error);
+                    onLeaderboardFailure(error);
+                })
+                .getLeaderboardData(selectedClassPeriod);
+        }
+        
+        // Add event listener for class period filter changes
+        classPeriodFilter.addEventListener('change', loadLeaderboard);
+
+        function renderLeaderboard(data) {
+            console.log("=== DEBUG: renderLeaderboard() called ===");
+            console.log("Received data:", data);
+            console.log("Data is array:", Array.isArray(data));
+            console.log("Data length:", data ? data.length : 'data is null/undefined');
+            
+            if (!data) {
+                console.log("DEBUG: Data is null or undefined");
+                leaderboardStatus.innerText = "Error: No data received from server";
+                return;
+            }
+            
+            if (data.length === 0) {
+                console.log("DEBUG: Data array is empty");
+                leaderboardStatus.innerText = "No one has submitted an activity yet. Be the first!";
+                return;
+            }
+            
+            console.log("DEBUG: Creating leaderboard table with", data.length, "students");
+            leaderboardStatus.innerText = "";
+            const table = document.createElement('table');
+            table.className = "min-w-full divide-y divide-gray-200 shadow-lg rounded-lg";
+            
+            // Create table headers
+            const thead = table.createTHead();
+            const headerRow = thead.insertRow();
+            headerRow.className = "bg-gray-100";
+            ['Rank', 'Name', 'Class Period', 'Points', 'Title'].forEach(text => {
+                const th = document.createElement('th');
+                th.className = "px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider";
+                th.innerText = text;
+                headerRow.appendChild(th);
+            });
+
+            // Create table body with student data
+            const tbody = document.createElement('tbody');
+            tbody.className = "bg-white divide-y divide-gray-200";
+            data.forEach((student, index) => {
+                console.log(`DEBUG: Processing student ${index + 1}:`, student);
+                const row = tbody.insertRow();
+                row.className = index % 2 === 0 ? "bg-white" : "bg-gray-50";
+
+                const rankCell = row.insertCell();
+                rankCell.className = "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900";
+                rankCell.innerText = student.rank;
+
+                const nameCell = row.insertCell();
+                nameCell.className = "px-6 py-4 whitespace-nowrap text-sm text-gray-600";
+                nameCell.innerText = student.name || student.email.split('@')[0];
+
+                const classPeriodCell = row.insertCell();
+                classPeriodCell.className = "px-6 py-4 whitespace-nowrap text-sm text-gray-600";
+                classPeriodCell.innerText = student.classPeriod || '';
+
+                const pointsCell = row.insertCell();
+                pointsCell.className = "px-6 py-4 whitespace-nowrap text-sm text-gray-600";
+                pointsCell.innerText = student.points;
+
+                const titleCell = row.insertCell();
+                titleCell.className = "px-6 py-4 whitespace-nowrap text-sm text-gray-600";
+                titleCell.innerText = student.title;
+            });
+
+            console.log("DEBUG: Table creation completed");
+
+            // Append tbody to table
+            table.appendChild(tbody);
+
+            // Append to the container
+            leaderboardContainer.innerHTML = '';
+            leaderboardContainer.appendChild(table);
+        }
+
+        function onLeaderboardFailure(error) {
+            leaderboardStatus.innerHTML = `<span class="text-red-600">Failed to load leaderboard: ${error.message}</span>`;
+        }
+
+        // Load the leaderboard and class periods on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadClassPeriods();
+            loadLeaderboard();
+        });
+    </script>
+</body>
+</html>
