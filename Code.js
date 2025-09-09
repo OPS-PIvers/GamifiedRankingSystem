@@ -31,6 +31,40 @@ function doGet() {
 }
 
 /**
+ * Gets the main logo URL for the web app.
+ * This function is called by JavaScript in the web app.
+ */
+function getMainLogoUrl() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const settingsSheet = spreadsheet.getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
+  
+  try {
+    if (settingsSheet && settingsSheet.getLastRow() > 1) {
+      // Find the row with "Main Logo" in column A and get the value from column B
+      const allSettingsData = settingsSheet.getRange(1, 1, settingsSheet.getLastRow(), 2).getValues();
+      const mainLogoRow = allSettingsData.find(row => row[0] === "Main Logo");
+      if (mainLogoRow && mainLogoRow[1]) {
+        const rawMainLogoUrl = mainLogoRow[1];
+        console.log("Raw main logo URL from settings:", rawMainLogoUrl);
+        
+        // Process the URL using the existing helper function
+        const processedMainLogoUrl = getPublicUrl(rawMainLogoUrl);
+        if (validateImageUrl(processedMainLogoUrl)) {
+          console.log("Using processed main logo URL:", processedMainLogoUrl);
+          return processedMainLogoUrl;
+        } else {
+          console.log("Main logo URL failed validation");
+        }
+      }
+    }
+  } catch (error) {
+    console.log("Error fetching main logo URL for web app:", error);
+  }
+  
+  return ""; // Empty string means no logo
+}
+
+/**
  * Initializes the spreadsheet with the necessary tabs and headers.
  * This should be run manually once before deploying the web app.
  */
@@ -79,6 +113,7 @@ function setupMythosSheets() {
   // Add a verification toggle
   settingsSheet.getRange(titlesData.length + 4, 1, 1, 2).setValues([["System Setting", "Value"]]).setFontWeight("bold");
   settingsSheet.getRange(titlesData.length + 5, 1, 1, 2).setValues([["Enable Teacher Verification", "TRUE"]]);
+  settingsSheet.getRange(titlesData.length + 6, 1, 1, 2).setValues([["Main Logo", ""]]);
 
   // Set up the Student Roster tab
   let rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
@@ -88,7 +123,7 @@ function setupMythosSheets() {
   rosterSheet.clear();
   const rosterHeaders = ["Student Name", "Student Email", "Class Period", "Total Points Earned", "Current Title Earned"];
   rosterSheet.getRange(1, 1, 1, rosterHeaders.length).setValues([rosterHeaders]).setFontWeight("bold");
-  rosterSheet.getRange('D2').setFormula("=IFERROR(SUMIF('" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!B:B,B2,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!G:G),0)");
+  rosterSheet.getRange('D2').setFormula("=IFERROR(SUMIFS('" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!G:G,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!B:B,B2,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!H:H,TRUE),0)");
   rosterSheet.getRange('E2').setFormula("=IFERROR(VLOOKUP(D2,'" + JOURNEY_SETTINGS_SHEET_NAME + "'!A:B,2,TRUE),\"Gnome\")");
 
 
@@ -98,7 +133,7 @@ function setupMythosSheets() {
     submissionsSheet = spreadsheet.insertSheet(STUDENT_SUBMISSIONS_SHEET_NAME, 2);
   }
   submissionsSheet.clear();
-  const submissionsHeaders = ["Timestamp", "Student Email", "Type of Media", "Title of Media", "Bonus Points (Yes/No)", "Reflection", "Pending Points", "Calculated Points", "Teacher Verified?"];
+  const submissionsHeaders = ["Timestamp", "Student Email", "Type of Media", "Title of Media", "Bonus Points (Yes/No)", "Reflection", "Points", "Teacher Verified?"];
   submissionsSheet.getRange(1, 1, 1, submissionsHeaders.length).setValues([submissionsHeaders]).setFontWeight("bold");
 
   SpreadsheetApp.getUi().alert("Mythos Ascendant sheets have been successfully set up!");
@@ -190,33 +225,46 @@ function processSubmission(formData) {
     }
     
     // Handle points based on verification setting
-    let pendingPoints = points;
-    let calculatedPoints = 0;
-    let verificationStatus = "Pending";
+    let earnedPoints = 0;
+    let verificationStatus = false; // ALWAYS start false (unchecked checkbox)
     
     if (enableVerification !== "TRUE") {
-        calculatedPoints = points;
-        verificationStatus = "Verified";
+        earnedPoints = points; // Award points immediately when verification is disabled
+        // verificationStatus stays false - checkbox unchecked but points already awarded
+    } else {
+        earnedPoints = 0; // No points until teacher verifies by checking the box
+        // verificationStatus stays false - teacher must check box to award points
     }
 
-    // Write the submission back to the sheet with pending points and calculated points
-    const newRow = [new Date(), email, mediaType, mediaTitle, bonusPoints, reflection, pendingPoints, calculatedPoints, verificationStatus];
+    // Write the submission back to the sheet
+    const newRow = [new Date(), email, mediaType, mediaTitle, bonusPoints, reflection, earnedPoints, verificationStatus];
     submissionsSheet.appendRow(newRow);
 
     // Force the spreadsheet to recalculate all formulas
     SpreadsheetApp.flush();
 
-    // Now, get the fresh, updated data from the spreadsheet
-    const newRosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues();
-    const newStudentRowIndex = newRosterData.findIndex(row => row[1] === email);
-    const newRosterRow = newRosterData[newStudentRowIndex];
-    const newTotalPoints = newRosterRow[3];
-    const newTitle = newRosterRow[4];
+    // Handle email sending based on verification setting
+    if (enableVerification !== "TRUE") {
+        // Verification disabled - send email immediately with updated points
+        // Force the spreadsheet to recalculate all formulas first
+        SpreadsheetApp.flush();
+        
+        // Get the fresh, updated data from the spreadsheet
+        const newRosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues();
+        const newStudentRowIndex = newRosterData.findIndex(row => row[1] === email);
+        const newRosterRow = newRosterData[newStudentRowIndex];
+        const newTotalPoints = newRosterRow[3];
+        const newTitle = newRosterRow[4];
 
-    // Send confirmation email
-    sendConfirmationEmail(email, newTotalPoints, oldTitle, newTitle);
+        // Send confirmation email
+        sendConfirmationEmail(email, newTotalPoints, oldTitle, newTitle);
+    }
+    // If verification is enabled, email will be sent when teacher verifies
 
-    return { status: "success", message: "Submission received! An email has been sent to you with an update on your points." };
+    const successMessage = enableVerification !== "TRUE" 
+        ? "Submission received! An email has been sent to you with an update on your points."
+        : "Submission received! Your submission is pending teacher verification.";
+    return { status: "success", message: successMessage };
   } catch (e) {
     return { status: "error", message: "An error occurred during submission: " + e.message };
   }
@@ -235,24 +283,91 @@ function verifySubmission(submissionRow) {
       throw new Error("Invalid submission row number");
     }
     
-    // Get the submission data
-    const submissionData = submissionsSheet.getRange(submissionRow, 1, 1, 9).getValues()[0];
-    const pendingPoints = submissionData[6]; // Column G (Pending Points)
-    const currentCalculatedPoints = submissionData[7]; // Column H (Calculated Points)
-    const currentStatus = submissionData[8]; // Column I (Verification Status)
+    // Get the submission data (now only 8 columns)
+    const submissionData = submissionsSheet.getRange(submissionRow, 1, 1, 8).getValues()[0];
+    const email = submissionData[1]; // Column B (Student Email)
+    const mediaType = submissionData[2]; // Column C (Type of Media)
+    const bonusPoints = submissionData[4]; // Column E (Bonus Points)
+    const currentPoints = submissionData[6]; // Column G (Points)
+    const currentStatus = submissionData[7]; // Column H (Teacher Verified?)
     
-    if (currentStatus === "Verified") {
+    if (currentStatus === true) {
       throw new Error("Submission is already verified");
     }
     
-    // Move pending points to calculated points
-    submissionsSheet.getRange(submissionRow, 8).setValue(pendingPoints); // Set Calculated Points
-    submissionsSheet.getRange(submissionRow, 9).setValue("Verified"); // Set status to Verified
+    // Recalculate the points for this submission
+    // Count past submissions by this student for this media type
+    let allSubmissions = [];
+    if (submissionsSheet.getLastRow() > 1) {
+        allSubmissions = submissionsSheet.getRange(2, 2, submissionsSheet.getLastRow() - 1, 3).getValues();
+    }
+    let submissionCount = 0;
+    for (const row of allSubmissions) {
+      if (row[0] === email && row[1] === mediaType) {
+        submissionCount++;
+      }
+    }
+    // Subtract 1 because we're counting the current submission too
+    submissionCount = Math.max(0, submissionCount - 1);
+
+    // Calculate points based on submission count
+    let points = 0;
+    if (submissionCount === 0) {
+      points = POINT_SYSTEM[mediaType].first;
+    } else if (submissionCount === 1) {
+      points = POINT_SYSTEM[mediaType].second;
+    } else {
+      points = POINT_SYSTEM[mediaType].thirdPlus;
+    }
+
+    // Add bonus points if applicable
+    if (bonusPoints === "Yes") {
+      points += BONUS_POINTS_VALUE;
+    }
+    
+    // Set the calculated points and mark as verified
+    submissionsSheet.getRange(submissionRow, 7).setValue(points); // Set Points (Column G)
+    submissionsSheet.getRange(submissionRow, 8).setValue(true); // Set checkbox to checked (Column H)
     
     // Force recalculation
     SpreadsheetApp.flush();
     
-    return { status: "success", message: "Submission verified successfully" };
+    // Send confirmation email to student about their points update
+    try {
+        const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+        const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
+        
+        // Get the student's current roster data
+        const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues();
+        const studentRowIndex = rosterData.findIndex(row => row[1] === email);
+        
+        if (studentRowIndex !== -1) {
+            const studentRow = rosterData[studentRowIndex];
+            const newTotalPoints = studentRow[3];
+            const newTitle = studentRow[4];
+            
+            // For verification emails, try to determine if this is a level up by checking point ranges
+            // Get the previous point total (current minus the points just added)
+            const previousPoints = Math.max(0, newTotalPoints - points);
+            
+            // Find what title they would have had with previous points
+            const titlesData = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 6, 4).getValues(); // Subtract 6 for system settings
+            let oldTitle = "Gnome";
+            for (const row of titlesData) {
+                if (previousPoints >= row[0]) {
+                    oldTitle = row[1];
+                }
+            }
+            
+            console.log(`Verification email: Previous points: ${previousPoints}, Old title: ${oldTitle}, New points: ${newTotalPoints}, New title: ${newTitle}`);
+            sendConfirmationEmail(email, newTotalPoints, oldTitle, newTitle);
+        }
+    } catch (emailError) {
+        console.log("Error sending verification email:", emailError);
+        // Don't fail the verification if email fails
+    }
+    
+    return { status: "success", message: "Submission verified successfully and student has been notified." };
   } catch (e) {
     return { status: "error", message: "Error verifying submission: " + e.message };
   }
@@ -284,11 +399,11 @@ function getPendingSubmissions() {
     return [];
   }
   
-  const allData = submissionsSheet.getRange(2, 1, submissionsSheet.getLastRow() - 1, 9).getValues();
+  const allData = submissionsSheet.getRange(2, 1, submissionsSheet.getLastRow() - 1, 8).getValues();
   const pendingSubmissions = [];
   
   allData.forEach((row, index) => {
-    if (row[8] === "Pending") { // Column I is verification status
+    if (row[7] === false) { // Column H is checkbox - false means unchecked/pending
       pendingSubmissions.push({
         rowNumber: index + 2, // +2 because we started from row 2 and arrays are 0-indexed
         timestamp: row[0],
@@ -297,8 +412,8 @@ function getPendingSubmissions() {
         mediaTitle: row[3],
         bonusPoints: row[4],
         reflection: row[5],
-        pendingPoints: row[6],
-        status: row[8]
+        currentPoints: row[6], // This will be 0 for pending submissions
+        status: row[7] // false = pending, true = verified
       });
     }
   });
@@ -568,11 +683,36 @@ function sendConfirmationEmail(recipientEmail, newTotalPoints, oldTitle, newTitl
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     const settingsSheet = spreadsheet.getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
     
-    // Corrected way to get titles data from the spreadsheet
+    // Get titles data from the spreadsheet
     let titlesData = [];
+    let mainLogoUrl = "https://img.icons8.com/color/96/000000/mythology.png"; // Default fallback
+    
     if (settingsSheet.getLastRow() > 1) {
-      titlesData = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() -1, 4).getValues();
+      titlesData = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 4).getValues();
+      
+      // Get the main logo URL from the settings
+      try {
+        // Find the row with "Main Logo" in column A and get the value from column B
+        const allSettingsData = settingsSheet.getRange(1, 1, settingsSheet.getLastRow(), 2).getValues();
+        const mainLogoRow = allSettingsData.find(row => row[0] === "Main Logo");
+        if (mainLogoRow && mainLogoRow[1]) {
+          const rawMainLogoUrl = mainLogoRow[1];
+          console.log("Raw main logo URL from settings:", rawMainLogoUrl);
+          
+          // Process the URL using the existing helper function
+          const processedMainLogoUrl = getPublicUrl(rawMainLogoUrl);
+          if (validateImageUrl(processedMainLogoUrl)) {
+            mainLogoUrl = processedMainLogoUrl;
+            console.log("Using processed main logo URL:", mainLogoUrl);
+          } else {
+            console.log("Main logo URL failed validation, using default");
+          }
+        }
+      } catch (error) {
+        console.log("Error fetching main logo URL:", error);
+      }
     }
+    
     const titlesMap = new Map(titlesData.map(row => [row[1], { message: row[2], imageUrl: row[3] }]));
 
     let levelUpMessage = `You've earned new points! Your total is now ${newTotalPoints}. Keep going to reach the next title: ${newTitle}.`;
@@ -614,6 +754,7 @@ function sendConfirmationEmail(recipientEmail, newTotalPoints, oldTitle, newTitl
     template.newTitle = newTitle;
     template.levelUpMessage = levelUpMessage;
     template.badgeImageUrl = badgeImageUrl;
+    template.mainLogoUrl = mainLogoUrl;
 
     const htmlBody = template.evaluate().getContent();
 
