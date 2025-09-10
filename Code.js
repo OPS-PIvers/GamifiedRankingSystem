@@ -688,7 +688,7 @@ function sendConfirmationEmail(recipientEmail, newTotalPoints, oldTitle, newTitl
     let mainLogoUrl = "https://img.icons8.com/color/96/000000/mythology.png"; // Default fallback
     
     if (settingsSheet.getLastRow() > 1) {
-      titlesData = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 4).getValues();
+      titlesData = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 6, 4).getValues();
       
       // Get the main logo URL from the settings
       try {
