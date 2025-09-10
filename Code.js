@@ -690,6 +690,18 @@ function sendConfirmationEmail(recipientEmail, newTotalPoints, oldTitle, newTitl
     if (settingsSheet.getLastRow() > 1) {
       titlesData = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 6, 4).getValues();
       
+      // DEBUG: Log the titles data structure
+      console.log("=== TITLES DATA DEBUG ===");
+      console.log("Titles data array:");
+      titlesData.forEach((row, index) => {
+        console.log(`Row ${index}: [${row[0]}, ${row[1]}, ${row[2]}, ${row[3]}]`);
+        console.log(`  Column A (row[0]): ${row[0]}`);
+        console.log(`  Column B (row[1]): ${row[1]}`);
+        console.log(`  Column C (row[2]): ${row[2]}`);
+        console.log(`  Column D (row[3]): ${row[3]}`);
+      });
+      console.log("=== END TITLES DATA DEBUG ===");
+      
       // Get the main logo URL from the settings
       try {
         // Find the row with "Main Logo" in column A and get the value from column B
@@ -718,35 +730,51 @@ function sendConfirmationEmail(recipientEmail, newTotalPoints, oldTitle, newTitl
     let levelUpMessage = `You've earned new points! Your total is now ${newTotalPoints}. Keep going to reach the next title: ${newTitle}.`;
     let badgeImageUrl = "https://placehold.co/100x100?text=Points";
     let isLevelUp = oldTitle !== newTitle;
-
-    if (isLevelUp && titlesMap.has(newTitle)) {
+    
+    // Always get badge for current title, regardless of level-up status
+    console.log("=== BADGE IMAGE PROCESSING DEBUG ===");
+    console.log("Processing badge image for title:", newTitle);
+    console.log("Is level up:", isLevelUp);
+    console.log("Old title:", oldTitle, "| New title:", newTitle);
+    
+    if (titlesMap.has(newTitle)) {
         const titleInfo = titlesMap.get(newTitle);
-        levelUpMessage = titleInfo.message;
         
-        console.log("Processing badge image for title:", newTitle);
+        // Only update message if it's a level up
+        if (isLevelUp) {
+            levelUpMessage = titleInfo.message;
+        }
+        
+        console.log("Title info from map:", titleInfo);
         console.log("Raw image URL from settings:", titleInfo.imageUrl);
+        console.log("Image URL type:", typeof titleInfo.imageUrl);
+        console.log("Image URL length:", titleInfo.imageUrl ? titleInfo.imageUrl.length : 'null/undefined');
         
         try {
             // Use the helper function to convert the image URL
             let processedImageUrl = getPublicUrl(titleInfo.imageUrl);
+            console.log("Processed image URL:", processedImageUrl);
             
             // Validate the processed URL
             if (validateImageUrl(processedImageUrl)) {
                 badgeImageUrl = processedImageUrl;
-                console.log("Using processed image URL:", badgeImageUrl);
+                console.log("✓ Using processed image URL:", badgeImageUrl);
             } else {
-                console.log("Processed URL failed validation, using fallback");
+                console.log("✗ Processed URL failed validation, using fallback");
                 badgeImageUrl = "https://placehold.co/150x150?text=" + encodeURIComponent(newTitle);
             }
         } catch (error) {
-            console.log("Error processing image URL:", error);
+            console.log("✗ Error processing image URL:", error);
             badgeImageUrl = "https://placehold.co/150x150?text=" + encodeURIComponent(newTitle);
         }
-    } else if (isLevelUp) {
-        // Level up but no title info found
-        console.log("Level up detected but no title info found for:", newTitle);
+    } else {
+        // No title info found in map
+        console.log("No title info found for:", newTitle);
         badgeImageUrl = "https://placehold.co/150x150?text=" + encodeURIComponent(newTitle);
     }
+    
+    console.log("Final badge image URL:", badgeImageUrl);
+    console.log("=== END BADGE IMAGE PROCESSING DEBUG ===");
 
     const template = HtmlService.createTemplateFromFile('Email');
     template.isLevelUp = isLevelUp;

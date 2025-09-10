@@ -34,7 +34,13 @@
                         <p style="font-size: 14px; color: #718096; margin-top: 10px;">🎉 Congratulations on earning your new title: <strong><?= newTitle ?></strong></p>
                     <? } else { ?>
                         <p style="font-size: 20px; font-weight: 600; color: #2d3748; margin-top: 20px;">You've earned new points!</p>
-                        <p style="font-size: 16px; color: #4a5568;">Your total is now **<?= newPoints ?>** points. Keep going to reach the next title: **<?= newTitle ?>**.</p>
+                        <div style="margin-top: 20px; border: 2px solid #e2e8f0; border-radius: 8px; padding: 10px; display: inline-block;">
+                            <img src="<?= badgeImageUrl ?>" alt="<?= newTitle ?> Badge" 
+                                 style="max-width: 150px; height: auto; display: block;" 
+                                 onerror="this.src='https://placehold.co/150x150?text=<?= encodeURIComponent(newTitle) ?>'; this.alt='<?= newTitle ?> Badge (Placeholder)';">
+                        </div>
+                        <p style="font-size: 16px; color: #4a5568; margin-top: 10px;">Your total is now <strong><?= newPoints ?></strong> points. Keep going to reach the next title!</p>
+                        <p style="font-size: 14px; color: #718096; margin-top: 5px;">Current Title: <strong><?= newTitle ?></strong></p>
                     <? } ?>
                 </td>
             </tr>
