@@ -4,40 +4,86 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mythos Ascendant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Spectral:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        olympus: {
+                            gold: '#C5A028',
+                            darkGold: '#A68521',
+                            navy: '#001F3F',
+                            marble: '#FDFCF0',
+                        }
+                    },
+                    fontFamily: {
+                        cinzel: ['Cinzel', 'serif'],
+                        spectral: ['Spectral', 'serif'],
+                    }
+                }
+            }
+        }
+    </script>
     <style>
         body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f7fafc;
+            font-family: 'Spectral', serif;
+            background-color: #f4f1ea;
+            background-image: url("https://www.transparenttextures.com/patterns/marble-v2.png");
+        }
+        .greek-border {
+            border: 4px solid #C5A028;
+            position: relative;
+        }
+        .greek-border::before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            right: 2px;
+            bottom: 2px;
+            border: 1px solid #C5A028;
+            pointer-events: none;
         }
         .container {
             max-width: 900px;
         }
+        h1, h2, h3 {
+            font-family: 'Cinzel', serif;
+        }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen p-4 flex flex-col items-center">
+<body class="min-h-screen p-4 flex flex-col items-center">
 
-    <div class="container mx-auto p-8 bg-white shadow-xl rounded-2xl md:p-12 mt-6">
-        <header class="text-center mb-10">
-            <div id="logo-container">
+    <div class="container mx-auto p-8 bg-[#FDFCF0] shadow-2xl rounded-sm md:p-12 mt-6 border-t-8 border-olympus-gold relative overflow-hidden">
+        <div class="absolute inset-0 opacity-10 pointer-events-none" style="background-image: url('https://www.transparenttextures.com/patterns/marble-v2.png');"></div>
+        <div class="relative z-10">
+        <header class="text-center mb-12">
+            <div id="logo-container" class="flex justify-center mb-6">
                 <!-- Logo will be loaded dynamically via JavaScript -->
             </div>
-            <h1 id="text-header" class="text-4xl md:text-5xl font-extrabold text-gray-900 leading-tight">Mythos Ascendant</h1>
-            <p class="text-lg text-gray-600 mt-2">Track your mythological journey and climb the ranks!</p>
+            <h1 id="text-header" class="text-5xl md:text-6xl font-black text-olympus-navy leading-tight tracking-tighter uppercase">Mythos Ascendant</h1>
+            <div class="flex items-center justify-center space-x-4 mt-4">
+                <div class="h-px bg-olympus-gold w-12 md:w-24"></div>
+                <p class="text-xl text-olympus-darkGold italic font-medium">Track your mythological journey and climb the ranks!</p>
+                <div class="h-px bg-olympus-gold w-12 md:w-24"></div>
+            </div>
         </header>
         
         <!-- Submission Form Section -->
-        <section class="mb-12">
-            <h2 class="text-2xl md:text-3xl font-bold text-gray-800 mb-6 text-center">Submit an Activity</h2>
-            <form id="submission-form" class="space-y-6">
-                <div>
-                    <label for="studentEmail" class="block text-sm font-medium text-gray-700">Student Email</label>
-                    <input type="email" id="studentEmail" name="studentEmail" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                </div>
-                
-                <div>
-                    <label for="mediaType" class="block text-sm font-medium text-gray-700">Type of Media</label>
-                    <select id="mediaType" name="mediaType" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+        <section class="mb-16 bg-white/50 p-6 md:p-10 rounded-sm border border-olympus-gold/30 shadow-inner">
+            <h2 class="text-3xl md:text-4xl font-bold text-olympus-navy mb-8 text-center uppercase tracking-widest border-b-2 border-olympus-gold pb-4 inline-block mx-auto w-full">Submit an Activity</h2>
+            <form id="submission-form" class="space-y-8 mt-8">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="studentEmail" class="block text-sm font-bold text-olympus-navy uppercase tracking-wider mb-2">Student Email</label>
+                        <input type="email" id="studentEmail" name="studentEmail" required class="mt-1 block w-full px-4 py-3 bg-white/80 border-2 border-olympus-gold/50 rounded-none shadow-sm focus:outline-none focus:ring-2 focus:ring-olympus-gold focus:border-olympus-gold transition-all">
+                    </div>
+
+                    <div>
+                        <label for="mediaType" class="block text-sm font-bold text-olympus-navy uppercase tracking-wider mb-2">Type of Media</label>
+                        <select id="mediaType" name="mediaType" required class="mt-1 block w-full px-4 py-3 bg-white/80 border-2 border-olympus-gold/50 rounded-none shadow-sm focus:outline-none focus:ring-2 focus:ring-olympus-gold focus:border-olympus-gold transition-all">
                         <option value="">-- Select --</option>
                         <option value="Written Story (book, online, etc)">Written Story (book, online, etc)</option>
                         <option value="Movie/TV Show/Play/Musical">Movie/TV Show/Play/Musical</option>
@@ -48,80 +94,93 @@
                     </select>
                 </div>
                 
+                </div>
+
                 <div>
-                    <label for="mediaTitle" class="block text-sm font-medium text-gray-700">Title of Media</label>
-                    <input type="text" id="mediaTitle" name="mediaTitle" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <label for="mediaTitle" class="block text-sm font-bold text-olympus-navy uppercase tracking-wider mb-2">Title of Media</label>
+                    <input type="text" id="mediaTitle" name="mediaTitle" required class="mt-1 block w-full px-4 py-3 bg-white/80 border-2 border-olympus-gold/50 rounded-none shadow-sm focus:outline-none focus:ring-2 focus:ring-olympus-gold focus:border-olympus-gold transition-all">
                 </div>
                 
-                <div id="bonus-points-section">
-                    <label class="block text-sm font-medium text-gray-700">Bonus Points</label>
-                    <p class="text-xs text-gray-500 mb-2">Did you read a foundational myth that directly connects to this modern story?</p>
-                    <div class="flex items-center space-x-4">
+                <div id="bonus-points-section" class="bg-olympus-navy/5 p-4 border-l-4 border-olympus-gold">
+                    <label class="block text-sm font-bold text-olympus-navy uppercase tracking-wider mb-2">Bonus Points</label>
+                    <p class="text-sm text-olympus-navy/70 mb-4 italic">Did you read a foundational myth that directly connects to this modern story?</p>
+                    <div class="flex items-center space-x-8">
                         <div class="flex items-center">
-                            <input id="bonusYes" name="bonusPoints" type="radio" value="Yes" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded">
-                            <label for="bonusYes" class="ml-2 block text-sm font-medium text-gray-700">Yes</label>
+                            <input id="bonusYes" name="bonusPoints" type="radio" value="Yes" class="focus:ring-olympus-gold h-5 w-5 text-olympus-gold border-olympus-gold">
+                            <label for="bonusYes" class="ml-3 block text-sm font-bold text-olympus-navy uppercase">Yes</label>
                         </div>
                         <div class="flex items-center">
-                            <input id="bonusNo" name="bonusPoints" type="radio" value="No" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" checked>
-                            <label for="bonusNo" class="ml-2 block text-sm font-medium text-gray-700">No</label>
+                            <input id="bonusNo" name="bonusPoints" type="radio" value="No" class="focus:ring-olympus-gold h-5 w-5 text-olympus-gold border-olympus-gold" checked>
+                            <label for="bonusNo" class="ml-3 block text-sm font-bold text-olympus-navy uppercase">No</label>
                         </div>
                     </div>
                 </div>
 
-                <div class="space-y-6 border-t border-gray-200 pt-6">
-                    <h3 class="text-xl font-bold text-gray-800">Weekly Reflection Log</h3>
+                <div class="space-y-8 border-t-2 border-olympus-gold/30 pt-8">
+                    <div class="flex items-center space-x-4 mb-4">
+                        <h3 class="text-2xl font-bold text-olympus-navy uppercase tracking-widest">Weekly Reflection Log</h3>
+                        <div class="h-px bg-olympus-gold grow"></div>
+                    </div>
                     
                     <div>
-                        <label for="reflectionDate" class="block text-sm font-medium text-gray-700">Date and Time</label>
-                        <p class="text-xs text-gray-500 mb-1">Note the date and the specific 40-45 minute block you dedicated to the assignment (e.g., Friday, Sept 12, 1:00 PM - 1:45 PM).</p>
-                        <input type="text" id="reflectionDate" name="reflectionDate" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        <label for="reflectionDate" class="block text-sm font-bold text-olympus-navy uppercase tracking-wider mb-2">Date and Time</label>
+                        <p class="text-xs text-olympus-navy/60 mb-2 italic">Note the date and the specific 40-45 minute block you dedicated to the assignment (e.g., Friday, Sept 12, 1:00 PM - 1:45 PM).</p>
+                        <input type="text" id="reflectionDate" name="reflectionDate" required class="mt-1 block w-full px-4 py-3 bg-white/80 border-2 border-olympus-gold/50 rounded-none shadow-sm focus:outline-none focus:ring-2 focus:ring-olympus-gold focus:border-olympus-gold transition-all" placeholder="e.g., Friday, Sept 12, 1:00 PM - 1:45 PM">
                     </div>
 
                     <div>
-                        <label for="reflectionConnection" class="block text-sm font-medium text-gray-700">Mythological Connection</label>
-                        <p class="text-xs text-gray-500 mb-1">In 2-3 sentences, explain how the modern piece of media incorporates mythology.</p>
-                        <textarea id="reflectionConnection" name="reflectionConnection" rows="3" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></textarea>
+                        <label for="reflectionConnection" class="block text-sm font-bold text-olympus-navy uppercase tracking-wider mb-2">Mythological Connection</label>
+                        <p class="text-xs text-olympus-navy/60 mb-2 italic">In 2-3 sentences, explain how the modern piece of media incorporates mythology.</p>
+                        <textarea id="reflectionConnection" name="reflectionConnection" rows="3" required class="mt-1 block w-full px-4 py-3 bg-white/80 border-2 border-olympus-gold/50 rounded-none shadow-sm focus:outline-none focus:ring-2 focus:ring-olympus-gold focus:border-olympus-gold transition-all"></textarea>
                     </div>
 
                     <div>
-                        <label for="reflectionAnalysis" class="block text-sm font-medium text-gray-700">Analysis</label>
-                        <p class="text-xs text-gray-500 mb-1">In 4-5 sentences, discuss one key theme or question.</p>
-                        <textarea id="reflectionAnalysis" name="reflectionAnalysis" rows="4" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></textarea>
+                        <label for="reflectionAnalysis" class="block text-sm font-bold text-olympus-navy uppercase tracking-wider mb-2">Analysis</label>
+                        <p class="text-xs text-olympus-navy/60 mb-2 italic">In 4-5 sentences, discuss one key theme or question.</p>
+                        <textarea id="reflectionAnalysis" name="reflectionAnalysis" rows="4" required class="mt-1 block w-full px-4 py-3 bg-white/80 border-2 border-olympus-gold/50 rounded-none shadow-sm focus:outline-none focus:ring-2 focus:ring-olympus-gold focus:border-olympus-gold transition-all"></textarea>
                     </div>
                 </div>
                 
-                <div id="status-message" class="text-center"></div>
+                <div id="status-message" class="text-center font-bold min-h-[1.5rem]"></div>
                 
-                <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
-                    Submit Activity
+                <button type="submit" class="w-full flex justify-center py-4 px-6 border-2 border-olympus-darkGold rounded-none shadow-lg text-lg font-bold text-white bg-olympus-gold hover:bg-olympus-darkGold focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-olympus-gold transition-all uppercase tracking-widest transform hover:-translate-y-1 active:translate-y-0">
+                    Submit Activity to the Gods
                 </button>
             </form>
         </section>
 
         <!-- Leaderboard Section -->
-        <hr class="border-gray-300 my-10" />
+        <div class="flex items-center justify-center space-x-4 my-16">
+            <div class="h-1 bg-olympus-gold grow opacity-30"></div>
+            <div class="w-4 h-4 bg-olympus-gold rotate-45"></div>
+            <div class="h-1 bg-olympus-gold grow opacity-30"></div>
+        </div>
 
-        <section>
-            <h2 class="text-2xl md:text-3xl font-bold text-gray-800 mb-6 text-center">Current Leaderboard</h2>
+        <section class="mb-12">
+            <h2 class="text-4xl md:text-5xl font-black text-olympus-navy mb-8 text-center uppercase tracking-[0.2em]">The Hall of Legends</h2>
             
             <!-- Class Period Filter -->
-            <div class="mb-6 flex justify-center">
-                <div class="w-64">
-                    <label for="classPeriodFilter" class="block text-sm font-medium text-gray-700 mb-2">Filter by Class Period</label>
-                    <select id="classPeriodFilter" class="block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                        <option value="All Classes">All Classes</option>
+            <div class="mb-10 flex justify-center">
+                <div class="w-full max-w-md bg-white/40 p-6 border border-olympus-gold/20 shadow-sm">
+                    <label for="classPeriodFilter" class="block text-sm font-bold text-olympus-navy uppercase tracking-widest mb-3 text-center">Filter by Class Period</label>
+                    <select id="classPeriodFilter" class="block w-full px-4 py-3 bg-white border-2 border-olympus-gold/40 rounded-none shadow-sm focus:outline-none focus:ring-2 focus:ring-olympus-gold focus:border-olympus-gold transition-all text-center font-bold">
+                        <option value="All Classes">-- All Heroic Classes --</option>
                         <!-- Options will be dynamically populated -->
                     </select>
                 </div>
             </div>
             
-            <div id="leaderboard" class="overflow-x-auto">
+            <div id="leaderboard" class="overflow-hidden border-2 border-olympus-navy shadow-2xl bg-white/90">
                 <!-- Leaderboard data will be dynamically loaded here -->
-                <p id="leaderboard-status" class="text-center text-gray-500">Loading leaderboard...</p>
+                <div id="leaderboard-status" class="text-center py-20">
+                    <div class="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-olympus-gold mb-4"></div>
+                    <p class="text-xl font-cinzel text-olympus-navy italic">Consulting the Oracles...</p>
+                </div>
             </div>
         </section>
 
-    </div>
+            </div> <!-- End relative z-10 -->
+        </div> <!-- End container -->
 
     <script>
         const form = document.getElementById('submission-form');
@@ -130,11 +189,13 @@
         const leaderboardStatus = document.getElementById('leaderboard-status');
         const classPeriodFilter = document.getElementById('classPeriodFilter');
 
+        let currentUserEmail = "";
+
         // Handles form submission
         form.addEventListener('submit', (event) => {
             event.preventDefault();
             
-            statusMessage.innerHTML = '<span class="text-blue-500">Submitting...</span>';
+            statusMessage.innerHTML = '<span class="text-blue-500 italic">Ascending to the gods...</span>';
             const formData = new FormData(form);
             const data = Object.fromEntries(formData.entries());
 
@@ -147,8 +208,9 @@
 
         function onSubmissionSuccess(result) {
             if (result.status === 'success') {
-                statusMessage.innerHTML = `<span class="text-green-600">${result.message}</span>`;
+                statusMessage.innerHTML = `<span class="text-green-600 font-bold">◈ ${result.message}</span>`;
                 form.reset();
+                loadUserEmail(); // Re-populate email
                 loadLeaderboard(); // Refresh the leaderboard
             } else {
                 statusMessage.innerHTML = `<span class="text-red-600">Error: ${result.message}</span>`;
@@ -156,7 +218,7 @@
         }
 
         function onSubmissionFailure(error) {
-            statusMessage.innerHTML = `<span class="text-red-600">Error: ${error.message}</span>`;
+            statusMessage.innerHTML = `<span class="text-red-600">The gods rejected your offering: ${error.message}</span>`;
         }
 
         // Populate class period filter options
@@ -185,23 +247,15 @@
         // Handles the leaderboard display
         function loadLeaderboard() {
             console.log("=== DEBUG: loadLeaderboard() called ===");
-            leaderboardStatus.innerText = "Loading leaderboard...";
+            leaderboardStatus.innerHTML = `
+                <div class="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-olympus-gold mb-4"></div>
+                <p class="text-xl font-cinzel text-olympus-navy italic">Consulting the Oracles...</p>
+            `;
             const selectedClassPeriod = classPeriodFilter.value;
-            console.log("Selected class period filter:", selectedClassPeriod);
             
             google.script.run
-                .withSuccessHandler(function(data) {
-                    console.log("=== DEBUG: Leaderboard data received ===");
-                    console.log("Data type:", typeof data);
-                    console.log("Data length:", data ? data.length : 'undefined');
-                    console.log("Raw data:", data);
-                    renderLeaderboard(data);
-                })
-                .withFailureHandler(function(error) {
-                    console.error("=== DEBUG: Leaderboard load failed ===");
-                    console.error("Error:", error);
-                    onLeaderboardFailure(error);
-                })
+                .withSuccessHandler(renderLeaderboard)
+                .withFailureHandler(onLeaderboardFailure)
                 .getLeaderboardData(selectedClassPeriod);
         }
         
@@ -209,69 +263,87 @@
         classPeriodFilter.addEventListener('change', loadLeaderboard);
 
         function renderLeaderboard(data) {
-            console.log("=== DEBUG: renderLeaderboard() called ===");
-            console.log("Received data:", data);
-            console.log("Data is array:", Array.isArray(data));
-            console.log("Data length:", data ? data.length : 'data is null/undefined');
-            
             if (!data) {
-                console.log("DEBUG: Data is null or undefined");
-                leaderboardStatus.innerText = "Error: No data received from server";
+                leaderboardStatus.innerHTML = '<p class="text-olympus-navy p-10">Error: No data received from the Heavens.</p>';
                 return;
             }
             
             if (data.length === 0) {
-                console.log("DEBUG: Data array is empty");
-                leaderboardStatus.innerText = "No one has submitted an activity yet. Be the first!";
+                leaderboardStatus.innerHTML = '<p class="text-olympus-navy p-10 italic">No heroes have emerged yet. Be the first to claim your place in history!</p>';
                 return;
             }
             
-            console.log("DEBUG: Creating leaderboard table with", data.length, "students");
-            leaderboardStatus.innerText = "";
+            leaderboardStatus.innerHTML = "";
             const table = document.createElement('table');
-            table.className = "min-w-full divide-y divide-gray-200 shadow-lg rounded-lg";
+            table.className = "min-w-full border-collapse";
             
             // Create table headers
             const thead = table.createTHead();
             const headerRow = thead.insertRow();
-            headerRow.className = "bg-gray-100";
-            ['Rank', 'Name', 'Class Period', 'Points', 'Title'].forEach(text => {
+            headerRow.className = "bg-olympus-navy text-olympus-gold";
+            ['Rank', 'Hero Name', 'Class Period', 'Divine Glory', 'Legendary Title'].forEach(text => {
                 const th = document.createElement('th');
-                th.className = "px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider";
+                th.className = "px-6 py-4 text-left text-sm font-bold uppercase tracking-[0.1em] border-b-2 border-olympus-gold";
                 th.innerText = text;
                 headerRow.appendChild(th);
             });
 
+            // Wreath SVG assets
+            const getWreath = (color) => `
+                <svg class="w-8 h-8 inline-block mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M7 17.5C7 17.5 3 15.5 3 10.5C3 5.5 7 3.5 7 3.5" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+                    <path d="M17 17.5C17 17.5 21 15.5 21 10.5C21 5.5 17 3.5 17 3.5" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+                    <path d="M9 13L11 15L15 11" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M6 7L4 8" stroke="${color}" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M6 11L4 12" stroke="${color}" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M6 15L4 16" stroke="${color}" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M18 7L20 8" stroke="${color}" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M18 11L20 12" stroke="${color}" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M18 15L20 16" stroke="${color}" stroke-width="1" stroke-linecap="round"/>
+                </svg>`;
+
             // Create table body with student data
             const tbody = document.createElement('tbody');
-            tbody.className = "bg-white divide-y divide-gray-200";
             data.forEach((student, index) => {
-                console.log(`DEBUG: Processing student ${index + 1}:`, student);
                 const row = tbody.insertRow();
-                row.className = index % 2 === 0 ? "bg-white" : "bg-gray-50";
+                const isCurrentUser = student.email === currentUserEmail;
+                
+                row.className = index % 2 === 0 ? "bg-white/60" : "bg-olympus-gold/5";
+                row.className += " border-b border-olympus-gold/10 hover:bg-olympus-gold/10 transition-colors";
+                if (isCurrentUser) {
+                    row.className += " bg-olympus-gold/20 font-bold border-l-4 border-l-olympus-gold";
+                }
 
                 const rankCell = row.insertCell();
-                rankCell.className = "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900";
-                rankCell.innerText = student.rank;
+                rankCell.className = "px-6 py-5 whitespace-nowrap text-lg font-bold text-olympus-navy";
+
+                let rankContent = student.rank;
+                if (student.rank === 1) rankContent = getWreath('#C5A028') + '<span class="align-middle">1</span>';
+                else if (student.rank === 2) rankContent = getWreath('#94A3B8') + '<span class="align-middle">2</span>';
+                else if (student.rank === 3) rankContent = getWreath('#B45309') + '<span class="align-middle">3</span>';
+                rankCell.innerHTML = rankContent;
 
                 const nameCell = row.insertCell();
-                nameCell.className = "px-6 py-4 whitespace-nowrap text-sm text-gray-600";
-                nameCell.innerText = student.name || student.email.split('@')[0];
+                nameCell.className = "px-6 py-5 whitespace-nowrap text-base font-bold text-olympus-navy uppercase tracking-tight";
+                nameCell.innerHTML = `
+                    <div class="flex flex-col">
+                        <span>${student.name || student.email.split('@')[0]}</span>
+                        ${isCurrentUser ? '<span class="text-[10px] text-olympus-darkGold tracking-widest">(YOU)</span>' : ''}
+                    </div>
+                `;
 
                 const classPeriodCell = row.insertCell();
-                classPeriodCell.className = "px-6 py-4 whitespace-nowrap text-sm text-gray-600";
+                classPeriodCell.className = "px-6 py-5 whitespace-nowrap text-sm text-olympus-navy/80 font-medium";
                 classPeriodCell.innerText = student.classPeriod || '';
 
                 const pointsCell = row.insertCell();
-                pointsCell.className = "px-6 py-4 whitespace-nowrap text-sm text-gray-600";
+                pointsCell.className = "px-6 py-5 whitespace-nowrap text-lg font-black text-olympus-darkGold";
                 pointsCell.innerText = student.points;
 
                 const titleCell = row.insertCell();
-                titleCell.className = "px-6 py-4 whitespace-nowrap text-sm text-gray-600";
-                titleCell.innerText = student.title;
+                titleCell.className = "px-6 py-5 whitespace-nowrap";
+                titleCell.innerHTML = `<span class="px-3 py-1 bg-olympus-navy text-olympus-gold text-xs font-bold uppercase tracking-widest rounded-full">${student.title}</span>`;
             });
-
-            console.log("DEBUG: Table creation completed");
 
             // Append tbody to table
             table.appendChild(tbody);
@@ -297,7 +369,7 @@
                         const logoImg = document.createElement('img');
                         logoImg.src = logoUrl;
                         logoImg.alt = 'Mythos Ascendant Logo';
-                        logoImg.className = 'w-full max-w-2xl mx-auto mb-4 rounded-lg shadow-sm';
+                        logoImg.className = 'w-full max-w-xl mx-auto mb-6 drop-shadow-xl';
                         logoImg.style.cssText = 'height: auto; display: block;';
                         
                         // Handle logo load success
@@ -328,11 +400,13 @@
             google.script.run
                 .withSuccessHandler(function(email) {
                     if (email && email !== "") {
+                        currentUserEmail = email;
                         const emailInput = document.getElementById('studentEmail');
                         emailInput.value = email;
                         emailInput.readOnly = true;
-                        emailInput.classList.add('bg-gray-200', 'cursor-not-allowed');
+                        emailInput.classList.add('bg-olympus-navy/5', 'cursor-not-allowed', 'italic', 'text-olympus-navy/60');
                         console.log("Automatically populated user email:", email);
+                        loadLeaderboard(); // Reload to highlight user
                     }
                 })
                 .withFailureHandler(function(error) {
@@ -349,5 +423,6 @@
             loadMainLogo();
         });
     </script>
+
 </body>
 </html>
