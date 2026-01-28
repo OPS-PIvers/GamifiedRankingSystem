@@ -21,6 +21,65 @@ const POINT_SYSTEM = {
 const BONUS_POINTS_VALUE = 5; // Points for each myth read that connects to the modern story
 
 /**
+ * Adds a custom menu to the spreadsheet when it's opened.
+ */
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('Mythos Admin')
+      .addItem('Setup Mythos Sheets', 'setupMythosSheets')
+      .addItem('Verify All Pending', 'batchVerifyPending')
+      .addToUi();
+}
+
+/**
+ * Automatically triggers when a cell in the spreadsheet is edited.
+ * Handles the teacher checking the "Verified" checkbox in the Student Submissions sheet.
+ */
+function onEdit(e) {
+  const range = e.range;
+  const sheet = range.getSheet();
+  const sheetName = sheet.getName();
+  
+  // Only process edits in the Student Submissions sheet, Column J (Verified status)
+  if (sheetName === STUDENT_SUBMISSIONS_SHEET_NAME && range.getColumn() === 10 && range.getRow() > 1) {
+    const isVerified = range.getValue();
+    
+    // If the checkbox was checked (TRUE)
+    if (isVerified === true) {
+      const row = range.getRow();
+      // Check if points are already set. If they are 0, we need to calculate and award them.
+      const pointsCell = sheet.getRange(row, 9);
+      if (pointsCell.getValue() === 0) {
+        verifySubmission(row);
+      }
+    }
+  }
+}
+
+/**
+ * Helper function to verify all pending submissions at once.
+ */
+function batchVerifyPending() {
+  const pending = getPendingSubmissions();
+  if (pending.length === 0) {
+    SpreadsheetApp.getUi().alert("No pending submissions found.");
+    return;
+  }
+  
+  const confirm = SpreadsheetApp.getUi().alert(
+    "Verify All",
+    `Are you sure you want to verify all ${pending.length} pending submissions?`,
+    SpreadsheetApp.getUi().ButtonSet.YES_NO
+  );
+  
+  if (confirm === SpreadsheetApp.getUi().Button.YES) {
+    const rows = pending.map(p => p.rowNumber);
+    verifyMultipleSubmissions(rows);
+    SpreadsheetApp.getUi().alert(`Successfully verified ${pending.length} submissions.`);
+  }
+}
+
+/**
  * Serves the HTML file for the web app.
  * This function is automatically called when a user visits the web app URL.
  */
@@ -28,6 +87,15 @@ function doGet() {
   return HtmlService.createHtmlOutputFromFile('index')
       .setTitle('Mythos Ascendant')
       .setFaviconUrl('https://img.icons8.com/color/48/000000/mythology.png');
+}
+
+/**
+ * Gets the email of the user accessing the web app.
+ * Since the app is deployed "as me" but "only for students in our domain",
+ * this will return the student's email.
+ */
+function getUserEmail() {
+  return Session.getActiveUser().getEmail();
 }
 
 /**
@@ -123,7 +191,7 @@ function setupMythosSheets() {
   rosterSheet.clear();
   const rosterHeaders = ["Student Name", "Student Email", "Class Period", "Total Points Earned", "Current Title Earned"];
   rosterSheet.getRange(1, 1, 1, rosterHeaders.length).setValues([rosterHeaders]).setFontWeight("bold");
-  rosterSheet.getRange('D2').setFormula("=IFERROR(SUMIFS('" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!G:G,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!B:B,B2,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!H:H,TRUE),0)");
+  rosterSheet.getRange('D2').setFormula("=IFERROR(SUMIFS('" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!I:I,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!B:B,B2,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!J:J,TRUE),0)");
   rosterSheet.getRange('E2').setFormula("=IFERROR(VLOOKUP(D2,'" + JOURNEY_SETTINGS_SHEET_NAME + "'!A:B,2,TRUE),\"Gnome\")");
 
 
@@ -133,7 +201,7 @@ function setupMythosSheets() {
     submissionsSheet = spreadsheet.insertSheet(STUDENT_SUBMISSIONS_SHEET_NAME, 2);
   }
   submissionsSheet.clear();
-  const submissionsHeaders = ["Timestamp", "Student Email", "Type of Media", "Title of Media", "Bonus Points (Yes/No)", "Reflection", "Points", "Teacher Verified?"];
+  const submissionsHeaders = ["Timestamp", "Student Email", "Type of Media", "Title of Media", "Bonus Points (Yes/No)", "Reflection: Date/Time", "Reflection: Mythological Connection", "Reflection: Analysis", "Points", "Teacher Verified?"];
   submissionsSheet.getRange(1, 1, 1, submissionsHeaders.length).setValues([submissionsHeaders]).setFontWeight("bold");
 
   SpreadsheetApp.getUi().alert("Mythos Ascendant sheets have been successfully set up!");
@@ -151,15 +219,25 @@ function processSubmission(formData) {
     const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
 
     // Get system settings
-    const verificationCell = settingsSheet.getRange(settingsSheet.getLastRow(), 2);
-    const enableVerification = verificationCell.getValue();
+    let enableVerification = "TRUE"; // Default
+    try {
+      const settingsData = settingsSheet.getDataRange().getValues();
+      const verificationRow = settingsData.find(row => row[0] === "Enable Teacher Verification");
+      if (verificationRow) {
+        enableVerification = String(verificationRow[1]).toUpperCase();
+      }
+    } catch (e) {
+      console.log("Error reading verification setting:", e);
+    }
     
     // Get submission data
     const email = formData.studentEmail.trim();
     const mediaType = formData.mediaType;
     const mediaTitle = formData.mediaTitle;
     const bonusPoints = formData.bonusPoints;
-    const reflection = formData.reflection;
+    const reflectionDate = formData.reflectionDate;
+    const reflectionConnection = formData.reflectionConnection;
+    const reflectionAnalysis = formData.reflectionAnalysis;
 
     // Fetch existing student info to check for level-up
     let rosterData = [];
@@ -180,8 +258,8 @@ function processSubmission(formData) {
         // Get the new row number and copy formulas
         const newRowNum = rosterSheet.getLastRow();
         
-        // Copy the SUMIF formula for total points (Column D)
-        const pointsFormula = "=IFERROR(SUMIF('" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!B:B,B" + newRowNum + ",'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!G:G),0)";
+        // Copy the SUMIFS formula for total points (Column D) - Consistent with setupMythosSheets
+        const pointsFormula = "=IFERROR(SUMIFS('" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!I:I,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!B:B,B" + newRowNum + ",'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!J:J,TRUE),0)";
         rosterSheet.getRange('D' + newRowNum).setFormula(pointsFormula);
         
         // Copy the VLOOKUP formula for title (Column E)  
@@ -226,18 +304,18 @@ function processSubmission(formData) {
     
     // Handle points based on verification setting
     let earnedPoints = 0;
-    let verificationStatus = false; // ALWAYS start false (unchecked checkbox)
+    let verificationStatus = false;
     
     if (enableVerification !== "TRUE") {
         earnedPoints = points; // Award points immediately when verification is disabled
-        // verificationStatus stays false - checkbox unchecked but points already awarded
+        verificationStatus = true; // Mark as verified so points are counted in Roster
     } else {
         earnedPoints = 0; // No points until teacher verifies by checking the box
-        // verificationStatus stays false - teacher must check box to award points
+        verificationStatus = false; // Teacher must check box to award points
     }
 
     // Write the submission back to the sheet
-    const newRow = [new Date(), email, mediaType, mediaTitle, bonusPoints, reflection, earnedPoints, verificationStatus];
+    const newRow = [new Date(), email, mediaType, mediaTitle, bonusPoints, reflectionDate, reflectionConnection, reflectionAnalysis, earnedPoints, verificationStatus];
     submissionsSheet.appendRow(newRow);
 
     // Force the spreadsheet to recalculate all formulas
@@ -283,13 +361,13 @@ function verifySubmission(submissionRow) {
       throw new Error("Invalid submission row number");
     }
     
-    // Get the submission data (now only 8 columns)
-    const submissionData = submissionsSheet.getRange(submissionRow, 1, 1, 8).getValues()[0];
+    // Get the submission data (now 10 columns)
+    const submissionData = submissionsSheet.getRange(submissionRow, 1, 1, 10).getValues()[0];
     const email = submissionData[1]; // Column B (Student Email)
     const mediaType = submissionData[2]; // Column C (Type of Media)
     const bonusPoints = submissionData[4]; // Column E (Bonus Points)
-    const currentPoints = submissionData[6]; // Column G (Points)
-    const currentStatus = submissionData[7]; // Column H (Teacher Verified?)
+    const currentPoints = submissionData[8]; // Column I (Points)
+    const currentStatus = submissionData[9]; // Column J (Teacher Verified?)
     
     if (currentStatus === true) {
       throw new Error("Submission is already verified");
@@ -326,8 +404,8 @@ function verifySubmission(submissionRow) {
     }
     
     // Set the calculated points and mark as verified
-    submissionsSheet.getRange(submissionRow, 7).setValue(points); // Set Points (Column G)
-    submissionsSheet.getRange(submissionRow, 8).setValue(true); // Set checkbox to checked (Column H)
+    submissionsSheet.getRange(submissionRow, 9).setValue(points); // Set Points (Column I)
+    submissionsSheet.getRange(submissionRow, 10).setValue(true); // Set checkbox to checked (Column J)
     
     // Force recalculation
     SpreadsheetApp.flush();
@@ -343,15 +421,19 @@ function verifySubmission(submissionRow) {
         
         if (studentRowIndex !== -1) {
             const studentRow = rosterData[studentRowIndex];
-            const newTotalPoints = studentRow[3];
-            const newTitle = studentRow[4];
             
             // For verification emails, try to determine if this is a level up by checking point ranges
             // Get the previous point total (current minus the points just added)
+            const newTotalPoints = studentRow[3];
+            const newTitle = studentRow[4];
             const previousPoints = Math.max(0, newTotalPoints - points);
             
             // Find what title they would have had with previous points
-            const titlesData = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 6, 4).getValues(); // Subtract 6 for system settings
+            const settingsSheet = spreadsheet.getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
+            const allSettingsData = settingsSheet.getDataRange().getValues();
+            // Filter out system settings (non-numeric points in column A or empty)
+            const titlesData = allSettingsData.filter(row => typeof row[0] === 'number');
+            
             let oldTitle = "Gnome";
             for (const row of titlesData) {
                 if (previousPoints >= row[0]) {
@@ -399,11 +481,11 @@ function getPendingSubmissions() {
     return [];
   }
   
-  const allData = submissionsSheet.getRange(2, 1, submissionsSheet.getLastRow() - 1, 8).getValues();
+  const allData = submissionsSheet.getRange(2, 1, submissionsSheet.getLastRow() - 1, 10).getValues();
   const pendingSubmissions = [];
   
   allData.forEach((row, index) => {
-    if (row[7] === false) { // Column H is checkbox - false means unchecked/pending
+    if (row[9] === false) { // Column J is checkbox - false means unchecked/pending
       pendingSubmissions.push({
         rowNumber: index + 2, // +2 because we started from row 2 and arrays are 0-indexed
         timestamp: row[0],
@@ -411,9 +493,11 @@ function getPendingSubmissions() {
         mediaType: row[2],
         mediaTitle: row[3],
         bonusPoints: row[4],
-        reflection: row[5],
-        currentPoints: row[6], // This will be 0 for pending submissions
-        status: row[7] // false = pending, true = verified
+        reflectionDate: row[5],
+        reflectionConnection: row[6],
+        reflectionAnalysis: row[7],
+        currentPoints: row[8], // This will be 0 for pending submissions
+        status: row[9] // false = pending, true = verified
       });
     }
   });

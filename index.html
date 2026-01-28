@@ -68,9 +68,26 @@
                     </div>
                 </div>
 
-                <div>
-                    <label for="reflection" class="block text-sm font-medium text-gray-700">Reflection</label>
-                    <textarea id="reflection" name="reflection" rows="4" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></textarea>
+                <div class="space-y-6 border-t border-gray-200 pt-6">
+                    <h3 class="text-xl font-bold text-gray-800">Weekly Reflection Log</h3>
+                    
+                    <div>
+                        <label for="reflectionDate" class="block text-sm font-medium text-gray-700">Date and Time</label>
+                        <p class="text-xs text-gray-500 mb-1">Note the date and the specific 40-45 minute block you dedicated to the assignment (e.g., Friday, Sept 12, 1:00 PM - 1:45 PM).</p>
+                        <input type="text" id="reflectionDate" name="reflectionDate" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+
+                    <div>
+                        <label for="reflectionConnection" class="block text-sm font-medium text-gray-700">Mythological Connection</label>
+                        <p class="text-xs text-gray-500 mb-1">In 2-3 sentences, explain how the modern piece of media incorporates mythology.</p>
+                        <textarea id="reflectionConnection" name="reflectionConnection" rows="3" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></textarea>
+                    </div>
+
+                    <div>
+                        <label for="reflectionAnalysis" class="block text-sm font-medium text-gray-700">Analysis</label>
+                        <p class="text-xs text-gray-500 mb-1">In 4-5 sentences, discuss one key theme or question.</p>
+                        <textarea id="reflectionAnalysis" name="reflectionAnalysis" rows="4" required class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></textarea>
+                    </div>
                 </div>
                 
                 <div id="status-message" class="text-center"></div>
@@ -306,8 +323,27 @@
                 .getMainLogoUrl();
         }
 
+        // Load and display the student's email
+        function loadUserEmail() {
+            google.script.run
+                .withSuccessHandler(function(email) {
+                    if (email && email !== "") {
+                        const emailInput = document.getElementById('studentEmail');
+                        emailInput.value = email;
+                        emailInput.readOnly = true;
+                        emailInput.classList.add('bg-gray-200', 'cursor-not-allowed');
+                        console.log("Automatically populated user email:", email);
+                    }
+                })
+                .withFailureHandler(function(error) {
+                    console.error("Failed to load user email:", error);
+                })
+                .getUserEmail();
+        }
+
         // Load the leaderboard, class periods, and logo on page load
         document.addEventListener('DOMContentLoaded', function() {
+            loadUserEmail();
             loadClassPeriods();
             loadLeaderboard();
             loadMainLogo();
