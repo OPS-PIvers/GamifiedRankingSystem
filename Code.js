@@ -28,7 +28,38 @@ function onOpen() {
   ui.createMenu('Mythos Admin')
       .addItem('Setup Mythos Sheets', 'setupMythosSheets')
       .addItem('Verify All Pending', 'batchVerifyPending')
+      .addItem('Recalculate All Submissions', 'recalculateAllSubmissions')
       .addToUi();
+}
+
+/**
+ * Iterates through all submissions and recalculates points based on media type and history.
+ * Useful for retroactively fixing points if they show as 0.
+ */
+function recalculateAllSubmissions() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const submissionsSheet = spreadsheet.getSheetByName(STUDENT_SUBMISSIONS_SHEET_NAME);
+  const lastRow = submissionsSheet.getLastRow();
+  
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("No submissions found to recalculate.");
+    return;
+  }
+
+  const confirm = SpreadsheetApp.getUi().alert(
+    "Recalculate All",
+    "Are you sure you want to recalculate points for ALL submissions? This will update Column I for every row.",
+    SpreadsheetApp.getUi().ButtonSet.YES_NO
+  );
+
+  if (confirm !== SpreadsheetApp.getUi().Button.YES) return;
+
+  // Process rows one by one to ensure the "previous submission count" logic works correctly for each row
+  for (let i = 2; i <= lastRow; i++) {
+    verifySubmission(i, true);
+  }
+
+  SpreadsheetApp.getUi().alert("All submissions have been recalculated.");
 }
 
 /**
@@ -47,11 +78,7 @@ function onEdit(e) {
     // If the checkbox was checked (TRUE)
     if (isVerified === true) {
       const row = range.getRow();
-      // Check if points are already set. If they are 0, we need to calculate and award them.
-      const pointsCell = sheet.getRange(row, 9);
-      if (pointsCell.getValue() === 0) {
-        verifySubmission(row);
-      }
+      verifySubmission(row);
     }
   }
 }
@@ -239,6 +266,28 @@ function processSubmission(formData) {
     const reflectionConnection = formData.reflectionConnection;
     const reflectionAnalysis = formData.reflectionAnalysis;
 
+    // Check for duplicates (same email, title, and analysis within the last 10 seconds)
+    const lastRow = submissionsSheet.getLastRow();
+    if (lastRow > 1) {
+      const lastSubmissions = submissionsSheet.getRange(Math.max(2, lastRow - 5), 1, Math.min(5, lastRow - 1), 8).getValues();
+      const now = new Date().getTime();
+      
+      for (const row of lastSubmissions) {
+        const rowTime = new Date(row[0]).getTime();
+        const rowEmail = row[1];
+        const rowTitle = row[3];
+        const rowAnalysis = row[7];
+        
+        if (rowEmail === email && 
+            rowTitle === mediaTitle && 
+            rowAnalysis === reflectionAnalysis && 
+            (now - rowTime) < 10000) { // 10 second window
+          console.log("Duplicate submission detected and blocked for:", email);
+          return { status: "success", message: "Submission received! (Duplicate prevented)" };
+        }
+      }
+    }
+
     // Fetch existing student info to check for level-up
     let rosterData = [];
     if (rosterSheet.getLastRow() > 1) {
@@ -289,12 +338,13 @@ function processSubmission(formData) {
 
     // Calculate points based on submission count
     let points = 0;
+    const mediaSettings = POINT_SYSTEM[mediaType] || POINT_SYSTEM['Other'];
     if (submissionCount === 0) {
-      points = POINT_SYSTEM[mediaType].first;
+      points = mediaSettings.first;
     } else if (submissionCount === 1) {
-      points = POINT_SYSTEM[mediaType].second;
+      points = mediaSettings.second;
     } else {
-      points = POINT_SYSTEM[mediaType].thirdPlus;
+      points = mediaSettings.thirdPlus;
     }
 
     // Add bonus points if applicable
@@ -303,19 +353,14 @@ function processSubmission(formData) {
     }
     
     // Handle points based on verification setting
-    let earnedPoints = 0;
     let verificationStatus = false;
     
     if (enableVerification !== "TRUE") {
-        earnedPoints = points; // Award points immediately when verification is disabled
         verificationStatus = true; // Mark as verified so points are counted in Roster
-    } else {
-        earnedPoints = 0; // No points until teacher verifies by checking the box
-        verificationStatus = false; // Teacher must check box to award points
     }
 
-    // Write the submission back to the sheet
-    const newRow = [new Date(), email, mediaType, mediaTitle, bonusPoints, reflectionDate, reflectionConnection, reflectionAnalysis, earnedPoints, verificationStatus];
+    // Write the submission back to the sheet - ALWAYS record the points for visibility
+    const newRow = [new Date(), email, mediaType, mediaTitle, bonusPoints, reflectionDate, reflectionConnection, reflectionAnalysis, points, verificationStatus];
     submissionsSheet.appendRow(newRow);
 
     // Force the spreadsheet to recalculate all formulas
@@ -351,8 +396,9 @@ function processSubmission(formData) {
 /**
  * Verifies a submission by moving pending points to calculated points.
  * @param {number} submissionRow The row number of the submission to verify (1-indexed).
+ * @param {boolean} skipEmail Whether to skip sending the confirmation email (useful for bulk updates).
  */
-function verifySubmission(submissionRow) {
+function verifySubmission(submissionRow, skipEmail = false) {
   try {
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     const submissionsSheet = spreadsheet.getSheetByName(STUDENT_SUBMISSIONS_SHEET_NAME);
@@ -369,33 +415,27 @@ function verifySubmission(submissionRow) {
     const currentPoints = submissionData[8]; // Column I (Points)
     const currentStatus = submissionData[9]; // Column J (Teacher Verified?)
     
-    if (currentStatus === true) {
-      throw new Error("Submission is already verified");
-    }
-    
     // Recalculate the points for this submission
-    // Count past submissions by this student for this media type
-    let allSubmissions = [];
-    if (submissionsSheet.getLastRow() > 1) {
-        allSubmissions = submissionsSheet.getRange(2, 2, submissionsSheet.getLastRow() - 1, 3).getValues();
-    }
+    // Count past submissions by this student for this media type (only rows ABOVE this one)
     let submissionCount = 0;
-    for (const row of allSubmissions) {
-      if (row[0] === email && row[1] === mediaType) {
-        submissionCount++;
-      }
+    if (submissionRow > 2) {
+        const priorSubmissions = submissionsSheet.getRange(2, 2, submissionRow - 2, 2).getValues();
+        for (const row of priorSubmissions) {
+          if (row[0] === email && row[1] === mediaType) {
+            submissionCount++;
+          }
+        }
     }
-    // Subtract 1 because we're counting the current submission too
-    submissionCount = Math.max(0, submissionCount - 1);
 
-    // Calculate points based on submission count
+    // Calculate points based on submission count with safety fallback
     let points = 0;
+    const mediaSettings = POINT_SYSTEM[mediaType] || POINT_SYSTEM['Other'];
     if (submissionCount === 0) {
-      points = POINT_SYSTEM[mediaType].first;
+      points = mediaSettings.first;
     } else if (submissionCount === 1) {
-      points = POINT_SYSTEM[mediaType].second;
+      points = mediaSettings.second;
     } else {
-      points = POINT_SYSTEM[mediaType].thirdPlus;
+      points = mediaSettings.thirdPlus;
     }
 
     // Add bonus points if applicable

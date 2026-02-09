@@ -184,6 +184,7 @@
 
     <script>
         const form = document.getElementById('submission-form');
+        const submitButton = form.querySelector('button[type="submit"]');
         const statusMessage = document.getElementById('status-message');
         const leaderboardContainer = document.getElementById('leaderboard');
         const leaderboardStatus = document.getElementById('leaderboard-status');
@@ -195,14 +196,32 @@
         form.addEventListener('submit', (event) => {
             event.preventDefault();
             
+            // Disable button to prevent double-clicks
+            submitButton.disabled = true;
+            submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+            const originalButtonText = submitButton.innerText;
+            submitButton.innerText = "Ascending to the gods...";
+            
             statusMessage.innerHTML = '<span class="text-blue-500 italic">Ascending to the gods...</span>';
             const formData = new FormData(form);
             const data = Object.fromEntries(formData.entries());
 
             // Calls the server-side function to process the submission
             google.script.run
-                .withSuccessHandler(onSubmissionSuccess)
-                .withFailureHandler(onSubmissionFailure)
+                .withSuccessHandler((result) => {
+                    // Re-enable button
+                    submitButton.disabled = false;
+                    submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                    submitButton.innerText = originalButtonText;
+                    onSubmissionSuccess(result);
+                })
+                .withFailureHandler((error) => {
+                    // Re-enable button
+                    submitButton.disabled = false;
+                    submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                    submitButton.innerText = originalButtonText;
+                    onSubmissionFailure(error);
+                })
                 .processSubmission(data);
         });
 
