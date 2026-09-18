@@ -1,0 +1,9 @@
+{
+  "name": "gamified-ranking-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mythos Ascendant - a Google Apps Script web app for tracking student mythology submissions.",
+  "scripts": {
+    "test": "node tests/submissions.test.js"
+  }
+}

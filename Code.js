@@ -20,6 +20,23 @@ const POINT_SYSTEM = {
 
 const BONUS_POINTS_VALUE = 5; // Points for each myth read that connects to the modern story
 
+// How close together two identical submissions have to be to count as an accidental double-click.
+const DUPLICATE_WINDOW_MS = 10000;
+
+// How long a submission will wait for the lock before giving up and asking the student to retry.
+const SUBMISSION_LOCK_TIMEOUT_MS = 30000;
+
+/**
+ * Normalizes an email address for comparison.
+ * Emails typed by a teacher into the roster and emails returned by Session can differ
+ * in case and whitespace, which would otherwise create duplicate roster rows.
+ * @param {*} value The raw value to normalize.
+ * @returns {string} The trimmed, lower-cased email.
+ */
+function normalizeEmail(value) {
+  return String(value === null || value === undefined ? "" : value).trim().toLowerCase();
+}
+
 /**
  * Adds a custom menu to the spreadsheet when it's opened.
  */
@@ -29,7 +46,17 @@ function onOpen() {
       .addItem('Setup Mythos Sheets', 'setupMythosSheets')
       .addItem('Verify All Pending', 'batchVerifyPending')
       .addItem('Recalculate All Submissions', 'recalculateAllSubmissions')
+      .addItem('Repair Roster Formulas', 'repairRosterFormulas')
+      .addItem('Install Verification Email Trigger', 'installVerificationTrigger')
       .addToUi();
+
+  // Self-heal the roster totals every time the spreadsheet is opened, in case a formula in
+  // column D or E was cleared or overwritten.
+  try {
+    ensureRosterFormulas();
+  } catch (error) {
+    console.log("Could not repair roster formulas on open:", error);
+  }
 }
 
 /**
@@ -40,7 +67,7 @@ function recalculateAllSubmissions() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   const submissionsSheet = spreadsheet.getSheetByName(STUDENT_SUBMISSIONS_SHEET_NAME);
   const lastRow = submissionsSheet.getLastRow();
-  
+
   if (lastRow < 2) {
     SpreadsheetApp.getUi().alert("No submissions found to recalculate.");
     return;
@@ -54,32 +81,277 @@ function recalculateAllSubmissions() {
 
   if (confirm !== SpreadsheetApp.getUi().Button.YES) return;
 
-  // Process rows one by one to ensure the "previous submission count" logic works correctly for each row
+  // Process rows one by one to ensure the "previous submission count" logic works correctly for each row.
+  // skipEmail is essential here: without it a recalculation of a full class would send one email per
+  // row and exhaust the account's daily MailApp quota.
   for (let i = 2; i <= lastRow; i++) {
     verifySubmission(i, true);
   }
+
+  // Recalculating points is pointless if the roster has no formulas pointing at them.
+  refreshRosterFormulas();
 
   SpreadsheetApp.getUi().alert("All submissions have been recalculated.");
 }
 
 /**
+ * Rewrites the "Total Points Earned" and "Current Title Earned" formulas for every student
+ * on the roster.
+ *
+ * Both setupMythosSheets() and processSubmission() used to only ever write these formulas to a
+ * single row, so any student typed or pasted into the roster by hand had an empty column D and
+ * never accumulated points from the Student Submissions sheet.
+ */
+function refreshRosterFormulas() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
+  const lastRow = rosterSheet.getLastRow();
+
+  if (lastRow < 2) return 0;
+
+  const pointsFormulas = [];
+  const titleFormulas = [];
+  for (let row = 2; row <= lastRow; row++) {
+    pointsFormulas.push([buildRosterPointsFormula(row)]);
+    titleFormulas.push([buildRosterTitleFormula(row)]);
+  }
+
+  rosterSheet.getRange(2, 4, pointsFormulas.length, 1).setFormulas(pointsFormulas);
+  rosterSheet.getRange(2, 5, titleFormulas.length, 1).setFormulas(titleFormulas);
+  SpreadsheetApp.flush();
+
+  return lastRow - 1;
+}
+
+/**
+ * Restores only the roster formulas that are missing or have been overwritten.
+ *
+ * Columns D and E hold formulas, and a teacher sorting, clearing or pasting over the roster can
+ * wipe them - which silently stops points accumulating with no visible error. This is called on
+ * open and on every submission and verification so the damage repairs itself.
+ *
+ * @returns {number} How many cells were repaired.
+ */
+function ensureRosterFormulas() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
+  const lastRow = rosterSheet ? rosterSheet.getLastRow() : 0;
+
+  if (lastRow < 2) return 0;
+
+  const numRows = lastRow - 1;
+  const existingFormulas = rosterSheet.getRange(2, 4, numRows, 2).getFormulas();
+  let repaired = 0;
+
+  for (let i = 0; i < numRows; i++) {
+    const row = i + 2;
+
+    if (!isPointsFormula(existingFormulas[i][0])) {
+      rosterSheet.getRange(row, 4).setFormula(buildRosterPointsFormula(row));
+      repaired++;
+    }
+
+    if (!isTitleFormula(existingFormulas[i][1])) {
+      rosterSheet.getRange(row, 5).setFormula(buildRosterTitleFormula(row));
+      repaired++;
+    }
+  }
+
+  if (repaired > 0) {
+    console.log(`Repaired ${repaired} roster formula cell(s).`);
+    SpreadsheetApp.flush();
+  }
+
+  return repaired;
+}
+
+/**
+ * @param {string} formula A formula string read from the roster.
+ * @returns {boolean} True if it still looks like the points total formula.
+ */
+function isPointsFormula(formula) {
+  return typeof formula === 'string' && formula.toUpperCase().indexOf('SUMIFS(') !== -1;
+}
+
+/**
+ * @param {string} formula A formula string read from the roster.
+ * @returns {boolean} True if it still looks like the title lookup formula.
+ */
+function isTitleFormula(formula) {
+  return typeof formula === 'string' && formula.toUpperCase().indexOf('VLOOKUP(') !== -1;
+}
+
+/**
+ * Puts a warning-only protection on the roster's calculated columns so that clearing or typing
+ * over them prompts the teacher first. Warning-only is deliberate: the owner can still make
+ * deliberate changes, and the script can still write to the range.
+ */
+function protectRosterFormulaColumns() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
+  if (!rosterSheet) return;
+
+  const description = "Mythos: calculated by formula - do not edit";
+
+  // Drop any previous copy so repeated runs do not stack protections.
+  rosterSheet.getProtections(SpreadsheetApp.ProtectionType.RANGE)
+      .filter(protection => protection.getDescription() === description)
+      .forEach(protection => protection.remove());
+
+  rosterSheet.getRange("D2:E")
+      .protect()
+      .setDescription(description)
+      .setWarningOnly(true);
+}
+
+/**
+ * Menu entry point for the roster repair so the teacher can fix the roster
+ * after pasting in a new class list or accidentally clearing a column.
+ */
+function repairRosterFormulas() {
+  const updated = refreshRosterFormulas();
+  if (updated === 0) {
+    SpreadsheetApp.getUi().alert("No students found on the roster.");
+    return;
+  }
+
+  try {
+    protectRosterFormulaColumns();
+  } catch (error) {
+    console.log("Could not protect roster formula columns:", error);
+  }
+
+  SpreadsheetApp.getUi().alert(
+    `Recalculation formulas restored for ${updated} student(s).\n\n` +
+    "Columns D and E are now marked as protected, so editing them will show a warning first. " +
+    "They are also repaired automatically whenever the sheet is opened or a student submits."
+  );
+}
+
+/**
+ * Builds the SUMIFS formula that totals a student's verified points.
+ * @param {number} rosterRow The roster row (1-indexed) the formula belongs to.
+ */
+function buildRosterPointsFormula(rosterRow) {
+  const submissions = "'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!";
+  return "=IFERROR(SUMIFS(" + submissions + "$I$2:$I," +
+         submissions + "$B$2:$B,$B" + rosterRow + "," +
+         submissions + "$J$2:$J,TRUE),0)";
+}
+
+/**
+ * Builds the VLOOKUP formula that turns a point total into a title.
+ * The lookup range is bounded to the numeric title rows: the "Journey Settings" sheet also holds
+ * text-keyed system settings below them, and an approximate-match VLOOKUP over a column that mixes
+ * text and numbers is not sorted ascending, so it can silently return the wrong title.
+ * @param {number} rosterRow The roster row (1-indexed) the formula belongs to.
+ */
+function buildRosterTitleFormula(rosterRow) {
+  const lastTitleRow = getLastTitleRow();
+  return "=IFERROR(VLOOKUP($D" + rosterRow + ",'" + JOURNEY_SETTINGS_SHEET_NAME +
+         "'!$A$2:$B$" + lastTitleRow + ",2,TRUE),\"Gnome\")";
+}
+
+/**
+ * Finds the last row of the "Journey Settings" sheet that holds a title (a numeric point threshold
+ * in column A). Everything below that is system settings.
+ * @returns {number} The 1-indexed last title row, or 1 if there are no titles.
+ */
+function getLastTitleRow() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const settingsSheet = spreadsheet.getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
+
+  if (!settingsSheet || settingsSheet.getLastRow() < 2) return 1;
+
+  const columnA = settingsSheet.getRange(1, 1, settingsSheet.getLastRow(), 1).getValues();
+  let lastTitleRow = 1;
+  for (let i = 0; i < columnA.length; i++) {
+    if (typeof columnA[i][0] === 'number') {
+      lastTitleRow = i + 1; // Convert the 0-indexed array position to a 1-indexed row.
+    }
+  }
+
+  return lastTitleRow;
+}
+
+/**
+ * Reads the title thresholds from the "Journey Settings" sheet, ignoring the system settings rows.
+ * @returns {Array<Array>} Rows of [points, title, message, imageUrl].
+ */
+function getTitlesData() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const settingsSheet = spreadsheet.getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
+  const lastTitleRow = getLastTitleRow();
+
+  if (!settingsSheet || lastTitleRow < 2) return [];
+
+  return settingsSheet.getRange(2, 1, lastTitleRow - 1, 4).getValues();
+}
+
+/**
+ * Installs an installable on-edit trigger.
+ *
+ * The simple onEdit(e) trigger runs unauthorized, so it can update points but can never call
+ * MailApp - which is why checking the "Teacher Verified?" box never emailed the student. An
+ * installable trigger runs with authorization and can.
+ */
+function installVerificationTrigger() {
+  const ui = SpreadsheetApp.getUi();
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Remove any previously installed copy so verifying a submission cannot send two emails.
+  ScriptApp.getProjectTriggers()
+      .filter(trigger => trigger.getHandlerFunction() === 'onVerificationEdit')
+      .forEach(trigger => ScriptApp.deleteTrigger(trigger));
+
+  ScriptApp.newTrigger('onVerificationEdit')
+      .forSpreadsheet(spreadsheet)
+      .onEdit()
+      .create();
+
+  ui.alert("Verification emails are now enabled. Students will be emailed when you check their \"Teacher Verified?\" box.");
+}
+
+/**
  * Automatically triggers when a cell in the spreadsheet is edited.
  * Handles the teacher checking the "Verified" checkbox in the Student Submissions sheet.
+ *
+ * This is the simple trigger, which runs without authorization: it awards the points but cannot
+ * send email. Run "Install Verification Email Trigger" from the Mythos Admin menu to also notify
+ * the student.
  */
 function onEdit(e) {
+  handleVerificationEdit(e, true);
+}
+
+/**
+ * Installed by installVerificationTrigger(). Same job as onEdit(), but authorized, so it also
+ * sends the student their confirmation email.
+ */
+function onVerificationEdit(e) {
+  handleVerificationEdit(e, false);
+}
+
+/**
+ * Shared handler for the simple and installable edit triggers.
+ * @param {Object} e The edit event.
+ * @param {boolean} skipEmail Whether to suppress the confirmation email.
+ */
+function handleVerificationEdit(e, skipEmail) {
+  // Guard against a missing event object, which happens if the function is run manually.
+  if (!e || !e.range) return;
+
   const range = e.range;
   const sheet = range.getSheet();
-  const sheetName = sheet.getName();
-  
-  // Only process edits in the Student Submissions sheet, Column J (Verified status)
-  if (sheetName === STUDENT_SUBMISSIONS_SHEET_NAME && range.getColumn() === 10 && range.getRow() > 1) {
-    const isVerified = range.getValue();
-    
-    // If the checkbox was checked (TRUE)
-    if (isVerified === true) {
-      const row = range.getRow();
-      verifySubmission(row);
-    }
+
+  // Only process single-cell edits in the Student Submissions sheet, Column J (Verified status)
+  if (sheet.getName() !== STUDENT_SUBMISSIONS_SHEET_NAME) return;
+  if (range.getColumn() !== 10 || range.getNumColumns() !== 1) return;
+  if (range.getRow() < 2) return;
+
+  // If the checkbox was checked (TRUE)
+  if (range.getValue() === true) {
+    verifySubmission(range.getRow(), skipEmail);
   }
 }
 
@@ -218,8 +490,6 @@ function setupMythosSheets() {
   rosterSheet.clear();
   const rosterHeaders = ["Student Name", "Student Email", "Class Period", "Total Points Earned", "Current Title Earned"];
   rosterSheet.getRange(1, 1, 1, rosterHeaders.length).setValues([rosterHeaders]).setFontWeight("bold");
-  rosterSheet.getRange('D2').setFormula("=IFERROR(SUMIFS('" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!I:I,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!B:B,B2,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!J:J,TRUE),0)");
-  rosterSheet.getRange('E2').setFormula("=IFERROR(VLOOKUP(D2,'" + JOURNEY_SETTINGS_SHEET_NAME + "'!A:B,2,TRUE),\"Gnome\")");
 
 
   // Set up the Student Submissions tab
@@ -231,6 +501,14 @@ function setupMythosSheets() {
   const submissionsHeaders = ["Timestamp", "Student Email", "Type of Media", "Title of Media", "Bonus Points (Yes/No)", "Reflection: Date/Time", "Reflection: Mythological Connection", "Reflection: Analysis", "Points", "Teacher Verified?"];
   submissionsSheet.getRange(1, 1, 1, submissionsHeaders.length).setValues([submissionsHeaders]).setFontWeight("bold");
 
+  // Apply the roster formulas to every student row that exists, and warn before they get edited.
+  refreshRosterFormulas();
+  try {
+    protectRosterFormulaColumns();
+  } catch (error) {
+    console.log("Could not protect roster formula columns:", error);
+  }
+
   SpreadsheetApp.getUi().alert("Mythos Ascendant sheets have been successfully set up!");
 }
 
@@ -239,158 +517,224 @@ function setupMythosSheets() {
  * @param {Object} formData An object containing data from the form.
  */
 function processSubmission(formData) {
+  // The web app is deployed to run as the deploying user, so every student's submission executes
+  // under the same account. Without a lock, a class submitting at once can interleave
+  // getLastRow()/appendRow() and quietly overwrite each other's rows.
+  const lock = LockService.getScriptLock();
   try {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const settingsSheet = spreadsheet.getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
-    const submissionsSheet = spreadsheet.getSheetByName(STUDENT_SUBMISSIONS_SHEET_NAME);
-    const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
-
-    // Get system settings
-    let enableVerification = "TRUE"; // Default
-    try {
-      const settingsData = settingsSheet.getDataRange().getValues();
-      const verificationRow = settingsData.find(row => row[0] === "Enable Teacher Verification");
-      if (verificationRow) {
-        enableVerification = String(verificationRow[1]).toUpperCase();
-      }
-    } catch (e) {
-      console.log("Error reading verification setting:", e);
-    }
-    
-    // Get submission data
-    const email = formData.studentEmail.trim();
-    const mediaType = formData.mediaType;
-    const mediaTitle = formData.mediaTitle;
-    const bonusPoints = formData.bonusPoints;
-    const reflectionDate = formData.reflectionDate;
-    const reflectionConnection = formData.reflectionConnection;
-    const reflectionAnalysis = formData.reflectionAnalysis;
-
-    // Check for duplicates (same email, title, and analysis within the last 10 seconds)
-    const lastRow = submissionsSheet.getLastRow();
-    if (lastRow > 1) {
-      const lastSubmissions = submissionsSheet.getRange(Math.max(2, lastRow - 5), 1, Math.min(5, lastRow - 1), 8).getValues();
-      const now = new Date().getTime();
-      
-      for (const row of lastSubmissions) {
-        const rowTime = new Date(row[0]).getTime();
-        const rowEmail = row[1];
-        const rowTitle = row[3];
-        const rowAnalysis = row[7];
-        
-        if (rowEmail === email && 
-            rowTitle === mediaTitle && 
-            rowAnalysis === reflectionAnalysis && 
-            (now - rowTime) < 10000) { // 10 second window
-          console.log("Duplicate submission detected and blocked for:", email);
-          return { status: "success", message: "Submission received! (Duplicate prevented)" };
-        }
-      }
-    }
-
-    // Fetch existing student info to check for level-up
-    let rosterData = [];
-    if (rosterSheet.getLastRow() > 1) {
-      rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues();
-    }
-    const studentRowIndex = rosterData.findIndex(row => row[1] === email);
-    
-    let oldPoints = 0;
-    let oldTitle = "Gnome";
-    let rosterRow = [];
-
-    if (studentRowIndex === -1) {
-        // New student, append a new row to the roster
-        rosterRow = ["", email, "", 0, "Gnome"];
-        rosterSheet.appendRow(rosterRow);
-        
-        // Get the new row number and copy formulas
-        const newRowNum = rosterSheet.getLastRow();
-        
-        // Copy the SUMIFS formula for total points (Column D) - Consistent with setupMythosSheets
-        const pointsFormula = "=IFERROR(SUMIFS('" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!I:I,'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!B:B,B" + newRowNum + ",'" + STUDENT_SUBMISSIONS_SHEET_NAME + "'!J:J,TRUE),0)";
-        rosterSheet.getRange('D' + newRowNum).setFormula(pointsFormula);
-        
-        // Copy the VLOOKUP formula for title (Column E)  
-        const titleFormula = "=IFERROR(VLOOKUP(D" + newRowNum + ",'" + JOURNEY_SETTINGS_SHEET_NAME + "'!A:B,2,TRUE),\"Gnome\")";
-        rosterSheet.getRange('E' + newRowNum).setFormula(titleFormula);
-        
-        // Force calculation of the new formulas
-        SpreadsheetApp.flush();
-    } else {
-        // Existing student, get their current stats
-        rosterRow = rosterSheet.getRange(studentRowIndex + 2, 1, 1, 5).getValues()[0];
-        oldPoints = rosterRow[3];
-        oldTitle = rosterRow[4];
-    }
-    
-    // Count past submissions by this student for this media type
-    let allSubmissions = [];
-    if (submissionsSheet.getLastRow() > 1) {
-        allSubmissions = submissionsSheet.getRange(2, 2, submissionsSheet.getLastRow() - 1, 3).getValues();
-    }
-    let submissionCount = 0;
-    for (const row of allSubmissions) {
-      if (row[0] === email && row[1] === mediaType) {
-        submissionCount++;
-      }
-    }
-
-    // Calculate points based on submission count
-    let points = 0;
-    const mediaSettings = POINT_SYSTEM[mediaType] || POINT_SYSTEM['Other'];
-    if (submissionCount === 0) {
-      points = mediaSettings.first;
-    } else if (submissionCount === 1) {
-      points = mediaSettings.second;
-    } else {
-      points = mediaSettings.thirdPlus;
-    }
-
-    // Add bonus points if applicable
-    if (bonusPoints === "Yes") {
-      points += BONUS_POINTS_VALUE;
-    }
-    
-    // Handle points based on verification setting
-    let verificationStatus = false;
-    
-    if (enableVerification !== "TRUE") {
-        verificationStatus = true; // Mark as verified so points are counted in Roster
-    }
-
-    // Write the submission back to the sheet - ALWAYS record the points for visibility
-    const newRow = [new Date(), email, mediaType, mediaTitle, bonusPoints, reflectionDate, reflectionConnection, reflectionAnalysis, points, verificationStatus];
-    submissionsSheet.appendRow(newRow);
-
-    // Force the spreadsheet to recalculate all formulas
-    SpreadsheetApp.flush();
-
-    // Handle email sending based on verification setting
-    if (enableVerification !== "TRUE") {
-        // Verification disabled - send email immediately with updated points
-        // Force the spreadsheet to recalculate all formulas first
-        SpreadsheetApp.flush();
-        
-        // Get the fresh, updated data from the spreadsheet
-        const newRosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues();
-        const newStudentRowIndex = newRosterData.findIndex(row => row[1] === email);
-        const newRosterRow = newRosterData[newStudentRowIndex];
-        const newTotalPoints = newRosterRow[3];
-        const newTitle = newRosterRow[4];
-
-        // Send confirmation email
-        sendConfirmationEmail(email, newTotalPoints, oldTitle, newTitle);
-    }
-    // If verification is enabled, email will be sent when teacher verifies
-
-    const successMessage = enableVerification !== "TRUE" 
-        ? "Submission received! An email has been sent to you with an update on your points."
-        : "Submission received! Your submission is pending teacher verification.";
-    return { status: "success", message: successMessage };
-  } catch (e) {
-    return { status: "error", message: "An error occurred during submission: " + e.message };
+    lock.waitLock(SUBMISSION_LOCK_TIMEOUT_MS);
+  } catch (lockError) {
+    console.log("Could not acquire submission lock:", lockError);
+    return {
+      status: "error",
+      message: "The scrolls are busy with other students right now. Please wait a moment and submit again."
+    };
   }
+
+  try {
+    return writeSubmission(formData);
+  } catch (e) {
+    console.log("Error processing submission:", e);
+    return { status: "error", message: "An error occurred during submission: " + e.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Does the actual work of recording a submission. Always called while holding the submission lock.
+ * @param {Object} formData An object containing data from the form.
+ */
+function writeSubmission(formData) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const settingsSheet = spreadsheet.getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
+  const submissionsSheet = spreadsheet.getSheetByName(STUDENT_SUBMISSIONS_SHEET_NAME);
+  const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
+
+  // Get system settings
+  let enableVerification = "TRUE"; // Default
+  try {
+    const settingsData = settingsSheet.getDataRange().getValues();
+    const verificationRow = settingsData.find(row => row[0] === "Enable Teacher Verification");
+    if (verificationRow) {
+      enableVerification = String(verificationRow[1]).toUpperCase();
+    }
+  } catch (e) {
+    console.log("Error reading verification setting:", e);
+  }
+  
+  // Get submission data. Everything is coerced and trimmed: the form can hand back undefined for
+  // a radio group with nothing selected, and calling .trim() on that used to throw before a
+  // single row was written.
+  const asText = value => String(value === null || value === undefined ? "" : value).trim();
+
+  // The email input is read-only once auto-populated, which exempts it from the browser's
+  // "required" validation, so an empty one really can reach the server. Fall back to the signed-in
+  // user rather than filing the submission under a blank name.
+  let email = asText(formData.studentEmail);
+  if (!email) {
+    try {
+      email = asText(Session.getActiveUser().getEmail());
+    } catch (sessionError) {
+      console.log("Could not read the active user's email:", sessionError);
+    }
+  }
+
+  const mediaType = asText(formData.mediaType);
+  const mediaTitle = asText(formData.mediaTitle);
+  const bonusPoints = asText(formData.bonusPoints) === "Yes" ? "Yes" : "No";
+  const reflectionDate = asText(formData.reflectionDate);
+  const reflectionConnection = asText(formData.reflectionConnection);
+  const reflectionAnalysis = asText(formData.reflectionAnalysis);
+
+  // Reject incomplete submissions up front instead of recording an unusable row.
+  const missingFields = [];
+  if (!email) missingFields.push("Student Email");
+  if (!mediaType) missingFields.push("Type of Media");
+  if (!mediaTitle) missingFields.push("Title of Media");
+  if (!reflectionDate) missingFields.push("Date and Time");
+  if (!reflectionConnection) missingFields.push("Mythological Connection");
+  if (!reflectionAnalysis) missingFields.push("Analysis");
+
+  if (missingFields.length > 0) {
+    return {
+      status: "error",
+      message: "Your offering is incomplete. Please fill in: " + missingFields.join(", ") + "."
+    };
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+
+  // Guard against an accidental double submission (the same student sending the same title and
+  // analysis twice within a few seconds).
+  const lastRow = submissionsSheet.getLastRow();
+  if (lastRow > 1) {
+    // Scan the most recent rows INCLUDING the last one - the previous version stopped at
+    // lastRow - 1, so it never looked at the row a double-click would just have created.
+    const startRow = Math.max(2, lastRow - 4);
+    const recentSubmissions = submissionsSheet.getRange(startRow, 1, lastRow - startRow + 1, 8).getValues();
+    const now = Date.now();
+
+    for (const row of recentSubmissions) {
+      const rowTime = row[0] instanceof Date ? row[0].getTime() : NaN;
+      if (isNaN(rowTime)) continue;
+
+      // Only an age inside the window counts. The previous version tested `now - rowTime < 10000`
+      // with no lower bound, so any row whose timestamp read as being in the future - which a
+      // script/spreadsheet timezone mismatch will do - matched forever and silently swallowed
+      // legitimate resubmissions.
+      const age = now - rowTime;
+      if (age < 0 || age > DUPLICATE_WINDOW_MS) continue;
+
+      if (normalizeEmail(row[1]) === normalizedEmail &&
+          asText(row[3]) === mediaTitle &&
+          asText(row[7]) === reflectionAnalysis) {
+        console.log("Duplicate submission detected and blocked for:", email);
+        return {
+          status: "success",
+          message: "Submission received! (We ignored an accidental duplicate of the one you just sent.)"
+        };
+      }
+    }
+  }
+
+  // Make sure the roster can actually total this student's points before we write anything.
+  ensureRosterFormulas();
+
+  // Fetch existing student info to check for level-up
+  let rosterData = [];
+  if (rosterSheet.getLastRow() > 1) {
+    rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues();
+  }
+  // Compare normalized emails so a roster entry typed with different capitalization does not
+  // silently create a second row for the same student.
+  const studentRowIndex = rosterData.findIndex(row => normalizeEmail(row[1]) === normalizedEmail);
+
+  let oldTitle = "Gnome";
+
+  if (studentRowIndex === -1) {
+      // New student, append a new row to the roster
+      rosterSheet.appendRow(["", email, "", 0, "Gnome"]);
+
+      const newRowNum = rosterSheet.getLastRow();
+      rosterSheet.getRange(newRowNum, 4).setFormula(buildRosterPointsFormula(newRowNum));
+      rosterSheet.getRange(newRowNum, 5).setFormula(buildRosterTitleFormula(newRowNum));
+
+      // Force calculation of the new formulas
+      SpreadsheetApp.flush();
+  } else {
+      // Existing student, get their current title so we can tell if this submission levels them up
+      oldTitle = rosterData[studentRowIndex][4] || "Gnome";
+  }
+
+  // Count past submissions by this student for this media type
+  let allSubmissions = [];
+  if (submissionsSheet.getLastRow() > 1) {
+      allSubmissions = submissionsSheet.getRange(2, 2, submissionsSheet.getLastRow() - 1, 2).getValues();
+  }
+  let submissionCount = 0;
+  for (const row of allSubmissions) {
+    if (normalizeEmail(row[0]) === normalizedEmail && asText(row[1]) === mediaType) {
+      submissionCount++;
+    }
+  }
+
+  // Calculate points based on submission count
+  let points = 0;
+  const mediaSettings = POINT_SYSTEM[mediaType] || POINT_SYSTEM['Other'];
+  if (submissionCount === 0) {
+    points = mediaSettings.first;
+  } else if (submissionCount === 1) {
+    points = mediaSettings.second;
+  } else {
+    points = mediaSettings.thirdPlus;
+  }
+
+  // Add bonus points if applicable
+  if (bonusPoints === "Yes") {
+    points += BONUS_POINTS_VALUE;
+  }
+
+  // Handle points based on verification setting
+  let verificationStatus = false;
+
+  if (enableVerification !== "TRUE") {
+      verificationStatus = true; // Mark as verified so points are counted in Roster
+  }
+
+  // Write the submission back to the sheet - ALWAYS record the points for visibility
+  const newRow = [new Date(), email, mediaType, mediaTitle, bonusPoints, reflectionDate, reflectionConnection, reflectionAnalysis, points, verificationStatus];
+  submissionsSheet.appendRow(newRow);
+
+  // Force the spreadsheet to recalculate all formulas
+  SpreadsheetApp.flush();
+
+  // Handle email sending based on verification setting.
+  // The submission is already saved at this point, so the email is sent in its own try/catch:
+  // a bounced address or an exhausted daily mail quota must never make a saved submission
+  // report itself as failed and send the student off to submit all over again.
+  if (enableVerification !== "TRUE") {
+    try {
+      const newRosterData = rosterSheet.getLastRow() > 1
+          ? rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues()
+          : [];
+      const updatedRow = newRosterData.find(row => normalizeEmail(row[1]) === normalizedEmail);
+
+      if (updatedRow) {
+        sendConfirmationEmail(email, updatedRow[3], oldTitle, updatedRow[4]);
+      } else {
+        console.log("No roster row found for " + email + "; skipping confirmation email.");
+      }
+    } catch (emailError) {
+      console.log("Error sending confirmation email:", emailError);
+    }
+  }
+  // If verification is enabled, email will be sent when teacher verifies
+
+  const successMessage = enableVerification !== "TRUE"
+      ? "Submission received! An email has been sent to you with an update on your points."
+      : "Submission received! Your submission is pending teacher verification.";
+  return { status: "success", message: successMessage };
 }
 
 /**
@@ -410,18 +754,17 @@ function verifySubmission(submissionRow, skipEmail = false) {
     // Get the submission data (now 10 columns)
     const submissionData = submissionsSheet.getRange(submissionRow, 1, 1, 10).getValues()[0];
     const email = submissionData[1]; // Column B (Student Email)
-    const mediaType = submissionData[2]; // Column C (Type of Media)
+    const mediaType = String(submissionData[2] || "").trim(); // Column C (Type of Media)
     const bonusPoints = submissionData[4]; // Column E (Bonus Points)
-    const currentPoints = submissionData[8]; // Column I (Points)
-    const currentStatus = submissionData[9]; // Column J (Teacher Verified?)
-    
+    const normalizedEmail = normalizeEmail(email);
+
     // Recalculate the points for this submission
     // Count past submissions by this student for this media type (only rows ABOVE this one)
     let submissionCount = 0;
     if (submissionRow > 2) {
         const priorSubmissions = submissionsSheet.getRange(2, 2, submissionRow - 2, 2).getValues();
         for (const row of priorSubmissions) {
-          if (row[0] === email && row[1] === mediaType) {
+          if (normalizeEmail(row[0]) === normalizedEmail && String(row[1] || "").trim() === mediaType) {
             submissionCount++;
           }
         }
@@ -446,50 +789,59 @@ function verifySubmission(submissionRow, skipEmail = false) {
     // Set the calculated points and mark as verified
     submissionsSheet.getRange(submissionRow, 9).setValue(points); // Set Points (Column I)
     submissionsSheet.getRange(submissionRow, 10).setValue(true); // Set checkbox to checked (Column J)
-    
+
+    // The roster only picks these points up through its formulas, so make sure they are intact.
+    ensureRosterFormulas();
+
     // Force recalculation
     SpreadsheetApp.flush();
-    
-    // Send confirmation email to student about their points update
-    try {
-        const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+    // Send confirmation email to student about their points update.
+    // skipEmail is honoured here: recalculateAllSubmissions() walks every row, and without this
+    // a single recalculation would email the whole class once per submission and blow through the
+    // account's daily mail quota.
+    if (!skipEmail) {
+      try {
         const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
-        
+
         // Get the student's current roster data
-        const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues();
-        const studentRowIndex = rosterData.findIndex(row => row[1] === email);
-        
-        if (studentRowIndex !== -1) {
-            const studentRow = rosterData[studentRowIndex];
-            
+        const rosterData = rosterSheet.getLastRow() > 1
+            ? rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues()
+            : [];
+        const studentRow = rosterData.find(row => normalizeEmail(row[1]) === normalizedEmail);
+
+        if (studentRow) {
             // For verification emails, try to determine if this is a level up by checking point ranges
             // Get the previous point total (current minus the points just added)
             const newTotalPoints = studentRow[3];
             const newTitle = studentRow[4];
             const previousPoints = Math.max(0, newTotalPoints - points);
-            
+
             // Find what title they would have had with previous points
-            const settingsSheet = spreadsheet.getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
-            const allSettingsData = settingsSheet.getDataRange().getValues();
-            // Filter out system settings (non-numeric points in column A or empty)
-            const titlesData = allSettingsData.filter(row => typeof row[0] === 'number');
-            
             let oldTitle = "Gnome";
-            for (const row of titlesData) {
+            for (const row of getTitlesData()) {
                 if (previousPoints >= row[0]) {
                     oldTitle = row[1];
                 }
             }
-            
+
             console.log(`Verification email: Previous points: ${previousPoints}, Old title: ${oldTitle}, New points: ${newTotalPoints}, New title: ${newTitle}`);
             sendConfirmationEmail(email, newTotalPoints, oldTitle, newTitle);
+        } else {
+            console.log("No roster row found for " + email + "; skipping verification email.");
         }
-    } catch (emailError) {
+      } catch (emailError) {
         console.log("Error sending verification email:", emailError);
         // Don't fail the verification if email fails
+      }
     }
-    
-    return { status: "success", message: "Submission verified successfully and student has been notified." };
+
+    return {
+      status: "success",
+      message: skipEmail
+          ? "Submission verified successfully."
+          : "Submission verified successfully and student has been notified."
+    };
   } catch (e) {
     return { status: "error", message: "Error verifying submission: " + e.message };
   }
@@ -536,7 +888,7 @@ function getPendingSubmissions() {
         reflectionDate: row[5],
         reflectionConnection: row[6],
         reflectionAnalysis: row[7],
-        currentPoints: row[8], // This will be 0 for pending submissions
+        currentPoints: row[8], // Provisional points; they only count once column J is TRUE
         status: row[9] // false = pending, true = verified
       });
     }
@@ -812,20 +1164,11 @@ function sendConfirmationEmail(recipientEmail, newTotalPoints, oldTitle, newTitl
     let mainLogoUrl = "https://img.icons8.com/color/96/000000/mythology.png"; // Default fallback
     
     if (settingsSheet.getLastRow() > 1) {
-      titlesData = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 6, 4).getValues();
-      
-      // DEBUG: Log the titles data structure
-      console.log("=== TITLES DATA DEBUG ===");
-      console.log("Titles data array:");
-      titlesData.forEach((row, index) => {
-        console.log(`Row ${index}: [${row[0]}, ${row[1]}, ${row[2]}, ${row[3]}]`);
-        console.log(`  Column A (row[0]): ${row[0]}`);
-        console.log(`  Column B (row[1]): ${row[1]}`);
-        console.log(`  Column C (row[2]): ${row[2]}`);
-        console.log(`  Column D (row[3]): ${row[3]}`);
-      });
-      console.log("=== END TITLES DATA DEBUG ===");
-      
+      // Read the title rows by detecting where they end rather than assuming the system settings
+      // occupy exactly the last 6 rows - adding or removing a setting used to silently drop or
+      // include the wrong rows here.
+      titlesData = getTitlesData();
+
       // Get the main logo URL from the settings
       try {
         // Find the row with "Main Logo" in column A and get the value from column B

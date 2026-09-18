@@ -195,7 +195,20 @@
         // Handles form submission
         form.addEventListener('submit', (event) => {
             event.preventDefault();
-            
+
+            // A read-only input is exempt from the browser's "required" check, so once the email
+            // field is auto-populated and locked an empty value can still reach the server.
+            const emailInput = document.getElementById('studentEmail');
+            if (!emailInput.value.trim()) {
+                if (currentUserEmail) {
+                    emailInput.value = currentUserEmail;
+                } else {
+                    statusMessage.innerHTML = '<span class="text-red-600">Still identifying you - please wait a moment and try again.</span>';
+                    loadUserEmail();
+                    return;
+                }
+            }
+
             // Disable button to prevent double-clicks
             submitButton.disabled = true;
             submitButton.classList.add('opacity-50', 'cursor-not-allowed');
@@ -229,7 +242,13 @@
             if (result.status === 'success') {
                 statusMessage.innerHTML = `<span class="text-green-600 font-bold">◈ ${result.message}</span>`;
                 form.reset();
-                loadUserEmail(); // Re-populate email
+                // form.reset() clears the auto-populated email, so restore it immediately rather
+                // than waiting on another round trip to the server.
+                if (currentUserEmail) {
+                    document.getElementById('studentEmail').value = currentUserEmail;
+                } else {
+                    loadUserEmail();
+                }
                 loadLeaderboard(); // Refresh the leaderboard
             } else {
                 statusMessage.innerHTML = `<span class="text-red-600">Error: ${result.message}</span>`;
