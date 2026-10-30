@@ -67,9 +67,25 @@ it does not model still needs checking in a live spreadsheet.
 
 ## Deploying
 
-Push with [`clasp`](https://github.com/google/clasp), then redeploy the web app so students get the
-new version:
+Every push to `main` runs `.github/workflows/deploy.yml`: it runs the tests, `clasp push`es the
+app, and updates the existing web app deployment to a new version, so the students' URL stays the
+same. It can also be run by hand from the Actions tab. It needs two repository secrets (Settings →
+Secrets and variables → Actions):
+
+| Secret | Where it comes from |
+| --- | --- |
+| `CLASPRC_JSON` | Run `clasp login` (clasp 3.x) locally, then copy the whole of `~/.clasprc.json` |
+| `APPS_SCRIPT_DEPLOYMENT_ID` | `clasp deployments` - the ID of the web app deployment (not `@HEAD`) |
+
+Without them the workflow skips the deploy with a warning rather than failing. `CLASPRC_JSON` holds a
+long-lived Google refresh token for that account, so treat it like a password.
+
+`.claspignore` limits what gets pushed to the five app files. Without it clasp would also upload
+`tests/`, whose Node `require()` calls would break the Apps Script project.
+
+To deploy by hand instead:
 
 ```sh
 clasp push
+clasp update-deployment <deployment-id>
 ```
