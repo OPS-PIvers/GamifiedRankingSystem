@@ -9,7 +9,8 @@ media they consume, awards points, and ranks them on a leaderboard.
 | --- | --- |
 | `Code.js` | Apps Script backend: form handling, point calculation, verification, email |
 | `index.html` | The student-facing web app (submission form + leaderboard) |
-| `Email.html` | Template for the confirmation email |
+| `Email.html` | Template for the points/title confirmation email |
+| `Reflections.html` | Template for the email that sends students a copy of their reflections |
 | `appsscript.json` | Apps Script manifest (timezone, web app access) |
 | `.clasp.json` | `clasp` project binding |
 
@@ -29,6 +30,23 @@ Opening the spreadsheet adds a **Mythos Admin** menu:
 - **Install Verification Email Trigger** — required for students to be emailed when you check
   their "Teacher Verified?" box. The simple `onEdit` trigger runs unauthorized and cannot send
   mail; points are still awarded without it.
+- **Email Reflection Logs to Students** — sends each student one email with every reflection they
+  have submitted, oldest first, so they have them to refer to in class. It asks who to send to:
+  leave it blank for everyone, type a class period, or type one student's email. It checks the
+  account's remaining daily mail quota first and won't start a send it can't finish.
+
+## Reflection copies
+
+Every time a student submits, they're also emailed a copy of what they wrote (media, date, the
+mythological connection and their analysis). This happens whether or not teacher verification is on.
+To turn it off, add a row to the System Settings on `Journey Settings`:
+
+| A | B |
+| --- | --- |
+| `Email Reflection Copy On Submit` | `FALSE` |
+
+Sheets created by **Setup Mythos Sheets** already have this row, set to `TRUE`. Sheets set up
+before it existed have no row and are treated as `TRUE`.
 
 The roster's calculated columns (D and E) repair themselves on open, on every submission, and on
 every verification, so a formula cleared by accident comes back on its own.

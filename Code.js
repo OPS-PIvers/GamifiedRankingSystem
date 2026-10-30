@@ -26,6 +26,12 @@ const DUPLICATE_WINDOW_MS = 10000;
 // How long a submission will wait for the lock before giving up and asking the student to retry.
 const SUBMISSION_LOCK_TIMEOUT_MS = 30000;
 
+// Journey Settings row that controls whether a student is emailed a copy of each reflection as
+// they submit it. A sheet set up before this setting existed has no such row, and is treated as on.
+const REFLECTION_COPY_SETTING = "Email Reflection Copy On Submit";
+
+const DEFAULT_EMAIL_LOGO_URL = "https://img.icons8.com/color/96/000000/mythology.png";
+
 /**
  * Normalizes an email address for comparison.
  * Emails typed by a teacher into the roster and emails returned by Session can differ
@@ -48,6 +54,8 @@ function onOpen() {
       .addItem('Recalculate All Submissions', 'recalculateAllSubmissions')
       .addItem('Repair Roster Formulas', 'repairRosterFormulas')
       .addItem('Install Verification Email Trigger', 'installVerificationTrigger')
+      .addSeparator()
+      .addItem('Email Reflection Logs to Students', 'emailReflectionLogs')
       .addToUi();
 
   // Self-heal the roster totals every time the spreadsheet is opened, in case a formula in
@@ -481,6 +489,7 @@ function setupMythosSheets() {
   settingsSheet.getRange(titlesData.length + 4, 1, 1, 2).setValues([["System Setting", "Value"]]).setFontWeight("bold");
   settingsSheet.getRange(titlesData.length + 5, 1, 1, 2).setValues([["Enable Teacher Verification", "TRUE"]]);
   settingsSheet.getRange(titlesData.length + 6, 1, 1, 2).setValues([["Main Logo", ""]]);
+  settingsSheet.getRange(titlesData.length + 7, 1, 1, 2).setValues([[REFLECTION_COPY_SETTING, "TRUE"]]);
 
   // Set up the Student Roster tab
   let rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
@@ -731,9 +740,29 @@ function writeSubmission(formData) {
   }
   // If verification is enabled, email will be sent when teacher verifies
 
-  const successMessage = enableVerification !== "TRUE"
+  // Send the student a copy of what they wrote, so they can refer back to it in class discussion.
+  // Like the points email, a failure here must not turn a saved submission into an error.
+  let reflectionCopySent = false;
+  if (getSystemSetting(REFLECTION_COPY_SETTING, "TRUE") === "TRUE") {
+    try {
+      sendReflectionEmail(email, {
+        subject: `Mythos Ascendant: Your reflection on ${mediaTitle}`,
+        heading: "Your Reflection",
+        intro: "Here is a copy of the reflection you just submitted.",
+        entries: [toReflectionEntry(newRow)]
+      });
+      reflectionCopySent = true;
+    } catch (reflectionEmailError) {
+      console.log("Error sending reflection copy:", reflectionEmailError);
+    }
+  }
+
+  let successMessage = enableVerification !== "TRUE"
       ? "Submission received! An email has been sent to you with an update on your points."
       : "Submission received! Your submission is pending teacher verification.";
+  if (reflectionCopySent) {
+    successMessage += " A copy of your reflection has been emailed to you.";
+  }
   return { status: "success", message: successMessage };
 }
 
@@ -1258,4 +1287,241 @@ function sendConfirmationEmail(recipientEmail, newTotalPoints, oldTitle, newTitl
         subject: `Mythos Ascendant: Your Journey Update!`,
         htmlBody: htmlBody
     });
+}
+
+/**
+ * Reads a value from the "System Setting" rows of the Journey Settings sheet.
+ * @param {string} name The setting's label in column A.
+ * @param {string} defaultValue Returned when the row is missing or blank.
+ * @returns {string} The upper-cased value, so "true", TRUE and "TRUE" all compare equal.
+ */
+function getSystemSetting(name, defaultValue) {
+  const settingsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(JOURNEY_SETTINGS_SHEET_NAME);
+  if (!settingsSheet || settingsSheet.getLastRow() < 1) return defaultValue;
+
+  const row = settingsSheet.getRange(1, 1, settingsSheet.getLastRow(), 2).getValues()
+      .find(r => r[0] === name);
+  if (!row || row[1] === "" || row[1] === null || row[1] === undefined) return defaultValue;
+
+  return String(row[1]).trim().toUpperCase();
+}
+
+/**
+ * Turns a Student Submissions row into the fields the reflection email shows.
+ * @param {Array} row The ten submission columns, A to J.
+ */
+function toReflectionEntry(row) {
+  const text = value => String(value === null || value === undefined ? "" : value).trim();
+  const submitted = row[0] instanceof Date
+      ? Utilities.formatDate(row[0], Session.getScriptTimeZone(), "MMM d, yyyy")
+      : text(row[0]);
+  const verified = row[9] === true;
+
+  return {
+    submitted: submitted,
+    mediaType: text(row[2]),
+    mediaTitle: text(row[3]),
+    reflectionDate: text(row[5]),
+    reflectionConnection: text(row[6]),
+    reflectionAnalysis: text(row[7]),
+    status: verified
+        ? `Verified - ${Number(row[8]) || 0} points`
+        : "Pending teacher verification"
+  };
+}
+
+/**
+ * Emails a student one or more of their reflections.
+ *
+ * The student's own words go through the template's escaping <?= ?> tags, so a reflection that
+ * happens to contain HTML is shown as typed rather than rendered. A plain-text body is sent too,
+ * for mail clients that do not show HTML.
+ *
+ * @param {string} recipientEmail The student's email address.
+ * @param {Object} options
+ * @param {string} options.subject The email subject.
+ * @param {string} options.heading The large heading at the top of the email.
+ * @param {string} options.intro One sentence under the heading.
+ * @param {Array<Object>} options.entries Reflections from toReflectionEntry().
+ * @param {number} [options.totalPoints] Shown with options.title in the footer when given.
+ * @param {string} [options.title] The student's current title.
+ */
+function sendReflectionEmail(recipientEmail, options) {
+  const showTotals = options.totalPoints !== undefined && options.title !== undefined;
+
+  const template = HtmlService.createTemplateFromFile('Reflections');
+  template.mainLogoUrl = getMainLogoUrl() || DEFAULT_EMAIL_LOGO_URL;
+  template.heading = options.heading;
+  template.intro = options.intro;
+  template.entries = options.entries;
+  template.showTotals = showTotals;
+  template.totalPoints = options.totalPoints;
+  template.title = options.title;
+
+  const plainText = [options.heading, options.intro, ""];
+  options.entries.forEach(entry => {
+    plainText.push(
+      `${entry.mediaTitle} (${entry.mediaType}) - submitted ${entry.submitted}`,
+      `When you experienced it: ${entry.reflectionDate}`,
+      `Mythological connection: ${entry.reflectionConnection}`,
+      `Analysis: ${entry.reflectionAnalysis}`,
+      entry.status,
+      ""
+    );
+  });
+  if (showTotals) {
+    plainText.push(`Glory Points: ${options.totalPoints}`, `Heroic Title: ${options.title}`);
+  }
+
+  MailApp.sendEmail({
+    to: recipientEmail,
+    subject: options.subject,
+    body: plainText.join("\n"),
+    htmlBody: template.evaluate().getContent()
+  });
+}
+
+/**
+ * Groups every submission by student, ready to email as one log per student.
+ *
+ * @param {string} filter Blank for every student, an email address for one student, or anything
+ *                        else to match against the roster's Class Period column.
+ * @returns {Array<Object>} One { email, name, totalPoints, title, entries } per student, with
+ *                          their reflections oldest first.
+ */
+function collectReflectionLogs(filter) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const submissionsSheet = spreadsheet.getSheetByName(STUDENT_SUBMISSIONS_SHEET_NAME);
+  const rosterSheet = spreadsheet.getSheetByName(STUDENT_ROSTER_SHEET_NAME);
+
+  if (!submissionsSheet || submissionsSheet.getLastRow() < 2) return [];
+
+  const rosterByEmail = new Map();
+  if (rosterSheet && rosterSheet.getLastRow() > 1) {
+    rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 5).getValues().forEach(row => {
+      const key = normalizeEmail(row[1]);
+      if (key && !rosterByEmail.has(key)) rosterByEmail.set(key, row);
+    });
+  }
+
+  const trimmedFilter = String(filter === null || filter === undefined ? "" : filter).trim();
+  const isEmailFilter = trimmedFilter.indexOf("@") !== -1;
+
+  const logs = new Map();
+  const rows = submissionsSheet.getRange(2, 1, submissionsSheet.getLastRow() - 1, 10).getValues();
+
+  for (const row of rows) {
+    const key = normalizeEmail(row[1]);
+    if (!key) continue;
+
+    const rosterRow = rosterByEmail.get(key);
+    if (isEmailFilter && key !== normalizeEmail(trimmedFilter)) continue;
+    if (trimmedFilter && !isEmailFilter &&
+        (!rosterRow || String(rosterRow[2]).trim() !== trimmedFilter)) continue;
+
+    if (!logs.has(key)) {
+      logs.set(key, {
+        email: rosterRow ? String(rosterRow[1]).trim() : String(row[1]).trim(),
+        name: rosterRow ? String(rosterRow[0]).trim() : "",
+        totalPoints: rosterRow ? Number(rosterRow[3]) || 0 : undefined,
+        title: rosterRow ? rosterRow[4] || "Gnome" : undefined,
+        rows: []
+      });
+    }
+    logs.get(key).rows.push(row);
+  }
+
+  return Array.from(logs.values()).map(log => {
+    // Rows are normally already in submission order, but a teacher sorting the sheet would
+    // otherwise scramble each student's log.
+    log.rows.sort((a, b) => {
+      const at = a[0] instanceof Date ? a[0].getTime() : 0;
+      const bt = b[0] instanceof Date ? b[0].getTime() : 0;
+      return at - bt;
+    });
+    log.entries = log.rows.map(toReflectionEntry);
+    delete log.rows;
+    return log;
+  });
+}
+
+/**
+ * Emails each student in `logs` every reflection they have submitted.
+ * @param {Array<Object>} logs From collectReflectionLogs().
+ * @returns {{sent: number, failed: Array<string>}} The count sent and the addresses that failed.
+ */
+function sendReflectionLogs(logs) {
+  let sent = 0;
+  const failed = [];
+
+  for (const log of logs) {
+    const count = log.entries.length;
+    try {
+      sendReflectionEmail(log.email, {
+        subject: "Mythos Ascendant: Your reflection log",
+        heading: "Your Reflection Log",
+        intro: `${log.name ? log.name + ", here" : "Here"} ${count === 1 ? "is the reflection" : `are all ${count} reflections`} you have submitted so far.`,
+        entries: log.entries,
+        totalPoints: log.totalPoints,
+        title: log.title
+      });
+      sent++;
+    } catch (error) {
+      console.log("Error sending reflection log to " + log.email + ":", error);
+      failed.push(log.email);
+    }
+  }
+
+  return { sent: sent, failed: failed };
+}
+
+/**
+ * Menu entry point: emails students a log of every reflection they have submitted, so they have
+ * them to refer back to. Can be aimed at everyone, one class period, or one student.
+ */
+function emailReflectionLogs() {
+  const ui = SpreadsheetApp.getUi();
+
+  const response = ui.prompt(
+    "Email Reflection Logs",
+    "Each student gets one email with every reflection they have submitted.\n\n" +
+    "Type a class period to send to that class, or a student's email to send to just them. " +
+    "Leave it blank to send to every student.",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const filter = response.getResponseText().trim();
+  const logs = collectReflectionLogs(filter);
+  const audience = filter ? `"${filter}"` : "any student";
+
+  if (logs.length === 0) {
+    ui.alert(`No submissions found for ${audience}.`);
+    return;
+  }
+
+  const remainingQuota = MailApp.getRemainingDailyQuota();
+  if (logs.length > remainingQuota) {
+    ui.alert(
+      "Not enough email quota",
+      `This would send ${logs.length} emails, but your account can only send ${remainingQuota} more today. ` +
+      "Try one class period at a time, or try again tomorrow.",
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+
+  const confirm = ui.alert(
+    "Email Reflection Logs",
+    `Send ${logs.length} student(s) a copy of their reflections?`,
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+
+  const result = sendReflectionLogs(logs);
+  let message = `Sent reflection logs to ${result.sent} student(s).`;
+  if (result.failed.length > 0) {
+    message += `\n\nThese could not be sent:\n${result.failed.join("\n")}`;
+  }
+  ui.alert(message);
 }

@@ -161,16 +161,24 @@ class Sheet {
  * @param {Object} [options]
  * @param {string} [options.activeUser] What Session.getActiveUser().getEmail() returns.
  * @param {boolean} [options.lockFails] Make LockService.waitLock() throw, as it does under load.
- * @returns {Object} The sandbox. Code.js's functions are properties on it, and `sentEmails`
- *                   collects everything passed to MailApp.sendEmail.
+ * @param {number} [options.mailQuota] What MailApp.getRemainingDailyQuota() returns.
+ * @param {string|null} [options.promptText] The teacher's answer to ui.prompt(); null cancels.
+ * @param {boolean} [options.confirm] Whether YES/NO alerts are answered YES. Defaults to true.
+ * @returns {Object} The sandbox. Code.js's functions are properties on it, `sentEmails`
+ *                   collects everything passed to MailApp.sendEmail, `templates` every evaluated
+ *                   HTML template with the variables it was given, and `alerts` every alert text.
  */
 function loadCode(sheets, options = {}) {
   const sentEmails = [];
+  const templates = [];
+  const alerts = [];
 
   const sandbox = {
     console: { log: () => {}, error: () => {} },
     Date, Math, String, Number, JSON, isNaN,
     sentEmails,
+    templates,
+    alerts,
 
     SpreadsheetApp: {
       getActiveSpreadsheet: () => ({
@@ -180,10 +188,18 @@ function loadCode(sheets, options = {}) {
       flush: () => {},
       ProtectionType: { RANGE: 'RANGE' },
       getUi: () => ({
-        alert: () => {},
-        createMenu: () => ({ addItem() { return this; }, addToUi() {} }),
-        ButtonSet: { YES_NO: 1 },
-        Button: { YES: 1 },
+        // alert(message) or alert(title, message, buttons); YES/NO prompts answer options.confirm.
+        alert: (...args) => {
+          alerts.push(args.length > 1 ? args[1] : args[0]);
+          return options.confirm === false ? 0 : 1;
+        },
+        prompt: () => ({
+          getSelectedButton: () => (options.promptText === null ? 0 : 1),
+          getResponseText: () => options.promptText || '',
+        }),
+        createMenu: () => ({ addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }),
+        ButtonSet: { YES_NO: 1, OK_CANCEL: 2, OK: 3 },
+        Button: { YES: 1, OK: 1 },
       }),
     },
 
@@ -194,12 +210,24 @@ function loadCode(sheets, options = {}) {
       }),
     },
 
-    Session: { getActiveUser: () => ({ getEmail: () => options.activeUser || '' }) },
+    Session: {
+      getActiveUser: () => ({ getEmail: () => options.activeUser || '' }),
+      getScriptTimeZone: () => 'America/Chicago',
+    },
 
-    MailApp: { sendEmail: message => sentEmails.push(message) },
+    Utilities: { formatDate: date => date.toISOString().slice(0, 10) },
+
+    MailApp: {
+      sendEmail: message => sentEmails.push(message),
+      getRemainingDailyQuota: () => (options.mailQuota === undefined ? 100 : options.mailQuota),
+    },
 
     HtmlService: {
-      createTemplateFromFile: () => ({ evaluate: () => ({ getContent: () => '<html></html>' }) }),
+      createTemplateFromFile: file => {
+        const template = { file, evaluate: () => ({ getContent: () => '<html></html>' }) };
+        templates.push(template);
+        return template;
+      },
     },
 
     ScriptApp: {
