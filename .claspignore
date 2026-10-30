@@ -1,0 +1,8 @@
+# clasp pushes every .js/.html/.json file it finds, including tests/, whose Node-only
+# require() calls would break the whole Apps Script project. Push only the app itself.
+**/**
+!appsscript.json
+!Code.js
+!index.html
+!Email.html
+!Reflections.html

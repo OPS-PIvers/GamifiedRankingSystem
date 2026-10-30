@@ -1,0 +1,68 @@
+name: Deploy to Apps Script
+
+# Pushes main to the Apps Script project and updates the existing web app deployment, so the
+# students' URL stays the same. Needs two repository secrets:
+#   CLASPRC_JSON              - the contents of ~/.clasprc.json after `clasp login` (clasp 3.x)
+#   APPS_SCRIPT_DEPLOYMENT_ID - the web app's deployment ID, from `clasp deployments`
+# Without them the workflow skips the deploy instead of failing.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once; a newer push waits for the one in flight.
+concurrency:
+  group: apps-script-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Don't ship a build that fails its own tests.
+      - name: Run tests
+        run: npm test
+
+      - name: Check deploy secrets
+        id: secrets
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ] || [ -z "$DEPLOYMENT_ID" ]; then
+            echo "::warning::CLASPRC_JSON or APPS_SCRIPT_DEPLOYMENT_ID is not set; skipping deploy."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install clasp
+        if: steps.secrets.outputs.configured == 'true'
+        run: npm install -g @google/clasp@3.4.1
+
+      - name: Write clasp credentials
+        if: steps.secrets.outputs.configured == 'true'
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          chmod 600 ~/.clasprc.json
+
+      # --force overwrites the manifest without the interactive prompt.
+      - name: Push code
+        if: steps.secrets.outputs.configured == 'true'
+        run: clasp push --force
+
+      # Creates a new version and points the existing deployment at it, so the URL does not change.
+      - name: Update the web app deployment
+        if: steps.secrets.outputs.configured == 'true'
+        env:
+          DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+        run: clasp update-deployment "$DEPLOYMENT_ID" --description "main ${GITHUB_SHA::7}"

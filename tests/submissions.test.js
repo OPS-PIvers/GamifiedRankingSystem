@@ -295,6 +295,142 @@ group('A contended lock is reported honestly rather than losing the row');
   check('and leaves nothing half-written', sheets['Student Submissions'].getLastRow() === 1);
 }
 
+group('Reflection copy: the student is emailed what they just wrote');
+{
+  const sheets = buildSheets();
+  const code = loadCode(sheets);
+  const result = code.processSubmission(form({ reflectionConnection: 'Hades rules the <b>underworld</b>.' }));
+  const copy = code.sentEmails.find(m => /reflection/i.test(m.subject));
+
+  check('sends one email even while verification is pending', code.sentEmails.length === 1,
+        code.sentEmails.length + ' emails sent');
+  check('to the student', copy && copy.to === 'kid@orono.k12.mn.us');
+  check('naming the media in the subject', copy && /Hades/.test(copy.subject), copy && copy.subject);
+  check('with all three reflection answers in the plain-text body',
+        copy && copy.body.includes(ANALYSIS) && copy.body.includes('underworld') &&
+        copy.body.includes('Friday, Sept 12'), copy && copy.body);
+  check('and tells the student it was sent', /copy of your reflection/i.test(result.message), result.message);
+
+  const template = code.templates.find(t => t.file === 'Reflections');
+  check('hands the HTML template the raw text, which its <?= ?> tags escape',
+        template && template.entries[0].reflectionConnection === 'Hades rules the <b>underworld</b>.');
+}
+{
+  const sheets = buildSheets({ verification: 'FALSE' });
+  const code = loadCode(sheets);
+  code.processSubmission(form());
+
+  check('with verification off it arrives alongside the points email',
+        code.sentEmails.length === 2 && code.sentEmails.some(m => /Journey Update/.test(m.subject)),
+        code.sentEmails.map(m => m.subject).join(' | '));
+}
+{
+  const sheets = buildSheets();
+  sheets['Journey Settings'].rows.push(['Email Reflection Copy On Submit', 'FALSE']);
+  const code = loadCode(sheets);
+  const result = code.processSubmission(form());
+
+  check('setting it to FALSE turns the copy off', code.sentEmails.length === 0);
+  check('and the student is not told one is coming', !/copy of your reflection/i.test(result.message));
+}
+{
+  const sheets = buildSheets();
+  const code = loadCode(sheets);
+  code.MailApp.sendEmail = () => { throw new Error('Service invoked too many times for one day: email.'); };
+  const result = code.processSubmission(form());
+
+  check('a failed copy still reports the saved submission as a success',
+        result.status === 'success' && sheets['Student Submissions'].getLastRow() === 2, JSON.stringify(result));
+  check('without claiming the copy was sent', !/copy of your reflection/i.test(result.message));
+}
+{
+  const sheets = buildSheets({ submissionRows: [submissionRow({ timestamp: new Date(Date.now() - 1000) })] });
+  const code = loadCode(sheets);
+  code.processSubmission(form());
+
+  check('a blocked double-click does not send a second copy', code.sentEmails.length === 0);
+}
+
+group('Reflection logs: the teacher can email each student everything they have written');
+{
+  const day = n => new Date(Date.UTC(2026, 9, n));
+  const options = () => ({
+    rosterRows: [
+      ['Ada', 'ada@orono.k12.mn.us', '3', 30, 'Kobold'],
+      ['Ben', 'ben@orono.k12.mn.us', '4', 10, 'Gnome'],
+    ],
+    // Deliberately out of order, with Ada's address typed in a different case.
+    submissionRows: [
+      submissionRow({ email: 'ada@orono.k12.mn.us', title: 'Percy Jackson', timestamp: day(20), verified: true }),
+      submissionRow({ email: 'ben@orono.k12.mn.us', title: 'Thor', timestamp: day(18) }),
+      submissionRow({ email: 'ADA@orono.k12.mn.us', title: 'Hades', timestamp: day(5), verified: true }),
+      submissionRow({ email: 'drop-in@orono.k12.mn.us', title: 'Moana', timestamp: day(7) }),
+    ],
+  });
+
+  {
+    const code = loadCode(buildSheets(options()), { promptText: '' });
+    code.emailReflectionLogs();
+
+    const ada = code.sentEmails.find(m => m.to === 'ada@orono.k12.mn.us');
+    check('a blank answer emails every student who has submitted, once each', code.sentEmails.length === 3,
+          code.sentEmails.map(m => m.to).join(', '));
+    check('a student\'s rows are gathered despite differing capitalization',
+          ada && /Hades/.test(ada.body) && /Percy Jackson/.test(ada.body));
+    check('oldest first, even when the sheet is not in order',
+          ada && ada.body.indexOf('Hades') < ada.body.indexOf('Percy Jackson'));
+    check('with their total and title', ada && /Glory Points: 30/.test(ada.body) && /Heroic Title: Kobold/.test(ada.body));
+    check('a student missing from the roster still gets theirs',
+          code.sentEmails.some(m => m.to === 'drop-in@orono.k12.mn.us'));
+    check('and the teacher is told how many went', code.alerts.some(a => /Sent reflection logs to 3/.test(a)),
+          code.alerts.join(' | '));
+  }
+  {
+    const code = loadCode(buildSheets(options()), { promptText: '4' });
+    code.emailReflectionLogs();
+    check('a class period sends to only that class',
+          code.sentEmails.length === 1 && code.sentEmails[0].to === 'ben@orono.k12.mn.us',
+          code.sentEmails.map(m => m.to).join(', '));
+  }
+  {
+    const code = loadCode(buildSheets(options()), { promptText: ' Ada@Orono.k12.mn.us ' });
+    code.emailReflectionLogs();
+    check('an email address sends to only that student',
+          code.sentEmails.length === 1 && code.sentEmails[0].to === 'ada@orono.k12.mn.us');
+  }
+  {
+    const code = loadCode(buildSheets(options()), { promptText: '', mailQuota: 2 });
+    code.emailReflectionLogs();
+    check('it refuses up front rather than running out of quota halfway', code.sentEmails.length === 0);
+    check('and explains why', code.alerts.some(a => /only send 2 more today/.test(a)), code.alerts.join(' | '));
+  }
+  {
+    const code = loadCode(buildSheets(options()), { promptText: null });
+    code.emailReflectionLogs();
+    check('cancelling the prompt sends nothing', code.sentEmails.length === 0);
+  }
+  {
+    const code = loadCode(buildSheets(options()), { promptText: '', confirm: false });
+    code.emailReflectionLogs();
+    check('answering No to the confirmation sends nothing', code.sentEmails.length === 0);
+  }
+  {
+    const code = loadCode(buildSheets(options()), { promptText: '7' });
+    code.emailReflectionLogs();
+    check('a period with no submissions says so', code.sentEmails.length === 0 &&
+          code.alerts.some(a => /No submissions found/.test(a)), code.alerts.join(' | '));
+  }
+  {
+    const code = loadCode(buildSheets(options()), { promptText: '' });
+    const realSend = code.MailApp.sendEmail;
+    code.MailApp.sendEmail = m => { if (m.to === 'ben@orono.k12.mn.us') throw new Error('bounced'); realSend(m); };
+    code.emailReflectionLogs();
+    check('one failed address does not stop the rest', code.sentEmails.length === 2);
+    check('and is named to the teacher', code.alerts.some(a => /ben@orono\.k12\.mn\.us/.test(a)),
+          code.alerts.join(' | '));
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
